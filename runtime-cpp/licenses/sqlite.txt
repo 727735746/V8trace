@@ -1,0 +1,10 @@
+SQLite 3.54.1
+https://www.sqlite.org/copyright.html
+https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip
+
+SQLite is in the public domain. The author disclaims copyright to this source code.
+The source distribution includes the following blessing:
+
+May you do good and not evil.
+May you find forgiveness for yourself and forgive others.
+May you share freely, never taking more than you give.

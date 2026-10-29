@@ -1,0 +1,6 @@
+dist/
+.cache/
+build/
+__pycache__/
+*.pyc
+*.pdb

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "v8trace": {
+      "command": "RUNTIME_EXE",
+      "args": [
+        "mcp", "--transport", "stdio",
+        "--source-root", "SOURCE_ROOT",
+        "--index-dir", "INDEX_DIR",
+        "--export-root", "EXPORT_ROOT"
+      ]
+    }
+  }
+}

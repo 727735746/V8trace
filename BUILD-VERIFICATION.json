@@ -1,0 +1,18 @@
+{
+  "protocol": "v8trace/public-host-source-verification/1",
+  "conclusion": "PASS",
+  "scope": "Community host/source preview only",
+  "independentWindowsBuild": true,
+  "ctestGroups": 21,
+  "professionalImplementationCount": 0,
+  "sourceManifestSha256": "b4815232b3232a26f661f6b1c9cb6507fe3b906173bd672977dce9dcfe74c4ac",
+  "runtimeSha256": "296aa82eb5c9e4e2c1bac041cc1551fbc9a0a29357d1d8fcc17da7242ea0331c",
+  "uiSha256": "52af7ca567c3a5165b030318c02eb13d7f848760f88e12ac01bae69b220e106a",
+  "communityNativeBrowserIncluded": false,
+  "communityNativeVerificationComplete": false,
+  "actualExeStartupVerified": true,
+  "longIndexStdioHttpAndUiVerified": true,
+  "stockChromeCdpFixtureVerified": true,
+  "thirdPartySourceCacheReused": true,
+  "sharedCoreSources": 34
+}

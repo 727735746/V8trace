@@ -1,0 +1,12 @@
+{
+  "protocol": "v8trace/source-policy/1",
+  "communityLicense": "Apache-2.0",
+  "professionalImplementationRoot": "professional",
+  "publicExportMode": "explicit-allowlist",
+  "fullInternalNativeExportAllowed": false,
+  "professionalBinaryEmbedsImplementationSource": false,
+  "communityNativeVerificationRequired": true,
+  "publicSourceIndependentBuildRequired": true,
+  "userCaptureDataExportAllowed": false,
+  "automaticRemotePublish": false
+}
