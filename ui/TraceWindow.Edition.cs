@@ -20,6 +20,7 @@ namespace V8Trace {
             advancedAnalysis = Value(edition, "advancedAnalysis") == "True";
             editionLabel = Value(edition, "label");
             Text = "V8 Trace Studio · " + editionLabel + " · Alcohol";
+            RefreshCyberEdition(true);
             foreach (var item in channels) {
                 if (editionRestricted.Contains(item.Key) && !item.Value.Text.EndsWith("[专业版]", StringComparison.Ordinal)) item.Value.Text += " [专业版]";
             }

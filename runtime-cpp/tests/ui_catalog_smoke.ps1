@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$PackagePath,[Parameter(Mandatory=$true)][string]$EvidencePath)
+param([Parameter(Mandatory=$true)][string]$PackagePath,[Parameter(Mandatory=$true)][string]$EvidencePath,[switch]$SkipClipboard)
 if ($PSVersionTable.PSEdition -ne 'Desktop') {
-    & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -File $PSCommandPath -PackagePath $PackagePath -EvidencePath $EvidencePath
+    $extra=@();if($SkipClipboard){$extra+='-SkipClipboard'}
+    & "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -STA -File $PSCommandPath -PackagePath $PackagePath -EvidencePath $EvidencePath @extra
     exit $LASTEXITCODE
 }
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,8 @@ using System.Windows.Forms;
 using V8Trace;
 public static class CatalogSmoke {
     static readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 8*1024*1024 };
-    static int checks;
+    static int checks,appliedPresets,blockedPresets,promptCount;
+    static bool professional;
     static string evidence,temporary;
     static readonly string[] rules={"detailScriptInclude","detailScriptExclude","jsFunctionInclude","jsFunctionExclude","nativeNameInclude","nativeNameExclude","jsValueScriptInclude","jsValueScriptExclude","jsValueFunctionInclude","jsValueFunctionExclude"};
     static readonly Dictionary<string,string> numbers=new Dictionary<string,string>{{"durationSeconds","DurationInput"},{"maxEvents","EventsBudgetInput"},{"maxBytes","BytesBudgetInput"},{"maxBodyBytes","BodyBudgetInput"},{"objectDepth","ObjectDepthInput"},{"objectNodes","ObjectNodesInput"},{"objectProperties","ObjectPropertiesInput"},{"writeBufferBytes","WriteBufferInput"},{"writeBatchBytes","WriteBatchInput"}};
@@ -77,6 +79,11 @@ public static class CatalogSmoke {
             scope.Text="";var before=SerializeOptions(f);choice.SelectedIndex=index;
             Check(SerializeOptions(f)==before,"Selecting preset mutates options");
             var record=Record(choice.SelectedItem);var expected=(Dictionary<string,object>)record["options"];
+            if(record.ContainsKey("available")&&!Convert.ToBoolean(record["available"])) {
+                scope.Text="*sample*.js";Check(!apply.Enabled,"Restricted preset enabled with concrete scope");
+                Invoke(f,"ApplyPreset");Check(SerializeOptions(f)==before,"Restricted preset changed configuration");
+                blockedPresets++;continue;
+            }
             bool required=Convert.ToBoolean(record["requiresScriptScope"]);
             if(required) {
                 foreach(var invalid in new[]{"","*","target.js\n*"," ?* ? "}) {
@@ -97,7 +104,9 @@ public static class CatalogSmoke {
             Check(Find<TextBox>(f,"UrlInput").Text=="https://example.test/"&&Find<TextBox>(f,"OutputInput").Text==@".\logs\catalog-test-new"&&Find<TextBox>(f,"ExportOutputInput").Text==@".\exports\catalog-test-new"&&Find<TextBox>(f,"UntilInput").Text=="window.TEST_DONE"&&Find<CheckBox>(f,"HeadlessOption").Checked,id+" user fields changed");
             Invoke(f,"SetBusy",true);Check(!scope.Enabled&&!apply.Enabled,"Scope controls active while busy");Invoke(f,"SetBusy",false);Check(scope.Enabled&&apply.Enabled,"Scope controls not restored");
             payloads.Add(actual);
+            appliedPresets++;
         }
+        Check(appliedPresets==(professional?21:17)&&blockedPresets==(professional?0:4),"Exact applied/restricted preset counts");
         Write("ui-options.json",payloads);
         choice.SelectedIndex=4;scope.Text="*sample*.js";Invoke(f,"ApplyPreset");
         Find<CheckBox>(f,"DetailFilteringOption").Checked=false;
@@ -110,7 +119,8 @@ public static class CatalogSmoke {
     [STAThread] public static int Main(string[] args) {
         var package=args[0];evidence=args[1];temporary=args[2];Directory.SetCurrentDirectory(package);
         Environment.SetEnvironmentVariable("NODE_OPTIONS","--v8trace-must-not-use-node");
-        IDataObject clipboard=null;bool saved=false;try{clipboard=RetryClipboard(()=>Clipboard.GetDataObject());saved=true;}catch{}
+        bool skipClipboard=args.Length>3&&args[3]=="no-clipboard";
+        IDataObject clipboard=null;bool saved=false;if(!skipClipboard)try{clipboard=RetryClipboard(()=>Clipboard.GetDataObject());saved=true;}catch{}
         TraceWindow f=null;var timer=new Timer{Interval=80};bool entered=false;int stage=0,promptIndex=0;string failure=null;
         var started=DateTime.UtcNow;var longGoal=new string('中',3500)+"😀 保留 {{goal}} 字面量";var rendered=new List<object>();
         try {
@@ -123,8 +133,14 @@ public static class CatalogSmoke {
                     if(stage==0) {
                         if(!Find<Button>(f,"StartButton").Enabled)return;
                         Check(Find<Label>(f,"PhaseLabel").Text.Contains("C++"),"Actual C++ worker not ready");
-                        Presets(f);RecordingControls(f);Check(Find<ComboBox>(f,"CasePromptChoice").Items.Count==6,"6 templates");
-                        Find<TabControl>(f,"EvidenceTabs").SelectedTab=Find<TabPage>(f,"CasePromptTab");stage=1;
+                        professional=(bool)typeof(TraceWindow).GetField("advancedAnalysis",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(f);
+                        Presets(f);RecordingControls(f);var templates=Find<ComboBox>(f,"CasePromptChoice");promptCount=professional?6:4;
+                        Check(templates.Items.Count==promptCount,"Exact edition template count");
+                        foreach(var item in templates.Items) {
+                            var id=Convert.ToString(Record(item)["id"]);
+                            Check(professional||(id!="jsvmp-evidence"&&id!="wasm-evidence"),"Restricted template offered in Community");
+                        }
+                        Find<TabControl>(f,"WorkspaceTabs").SelectedTab=Find<TabPage>(f,"CasePromptTab");stage=1;
                     }
                     if(stage==1) {
                         Find<ComboBox>(f,"CasePromptChoice").SelectedIndex=promptIndex;
@@ -135,18 +151,20 @@ public static class CatalogSmoke {
                     if(stage==2&&Find<Button>(f,"CopyCasePromptButton").Enabled) {
                         var text=Find<RichTextBox>(f,"CasePromptText").Text;
                         Check(text.Contains(longGoal)&&text.Contains("case/中文案例"),"Long Chinese fields lost");
+                        if(!skipClipboard){
                         Check(saved,"Clipboard original state not saved; stop before modifying it");Invoke(f,"CopyCasePrompt");
                         var clipboardText=RetryClipboard(()=>Clipboard.GetText(TextDataFormat.UnicodeText));
                         var mismatch=0;while(mismatch<Math.Min(text.Length,clipboardText.Length)&&text[mismatch]==clipboardText[mismatch])mismatch++;
                         Write("clipboard-probe-"+promptIndex+".json",new{expectedCharacters=text.Length,actualCharacters=clipboardText.Length,firstMismatch=mismatch,expectedNullAt=text.IndexOf('\0'),actualNullAt=clipboardText.IndexOf('\0'),lineEndingsOnly=text.Replace("\r\n","\n")==clipboardText.Replace("\r\n","\n"),copyStatus=Find<Label>(f,"CasePromptStatus").Text});
                         Check(clipboardText==text,"Clipboard mismatch");
                         Check(Find<Label>(f,"CasePromptStatus").Text.Contains("已复制并核验"),"Copy success falsely reported");
+                        }
                         var file=Path.Combine(temporary,"prompt-"+promptIndex+".md");Invoke(f,"WriteCasePrompt",file);
                         Check(File.ReadAllText(file,new UTF8Encoding(false,true))==text,"UTF-8 saved prompt mismatch");
-                        rendered.Add(new{templateIndex=promptIndex,characters=text.Length,copyVerified=true,utf8Saved=true});
+                        rendered.Add(new{templateIndex=promptIndex,characters=text.Length,copyVerified=!skipClipboard,utf8Saved=true});
                         if(promptIndex==0)Snapshot(f,"prompt-1280x860.png");
-                        promptIndex++;if(promptIndex<6){stage=1;return;}
-                        Write("ui-verification.json",new{conclusion="PASS",checks=checks,presets=21,promptTemplates=6,rendered=rendered,nodeRequired=false,browserStarted=false});
+                        promptIndex++;if(promptIndex<promptCount){stage=1;return;}
+                        Write("ui-verification.json",new{conclusion="PASS",checks=checks,edition=professional?"professional":"community",presets=21,appliedPresets=appliedPresets,blockedPresets=blockedPresets,promptTemplates=promptCount,clipboardTested=!skipClipboard,rendered=rendered,nodeRequired=false,browserStarted=false});
                         stage=3;timer.Stop();Invoke(f,"Send","shutdown",null);f.Close();
                     }
                 }catch(Exception error){failure=error.ToString();timer.Stop();try{Invoke(f,"Send","shutdown",null);}catch{}f.Close();}
@@ -168,9 +186,10 @@ try {
     Copy-Item -LiteralPath (Join-Path $package 'V8Trace.exe') -Destination $temporary
     Copy-Item -LiteralPath (Join-Path $package 'runtime') -Destination (Join-Path $temporary 'runtime') -Recurse
     Copy-Item -LiteralPath (Join-Path $package 'app') -Destination (Join-Path $temporary 'app') -Recurse
-    & $exe $package $evidence $temporary
+    $clipboardMode=if($SkipClipboard){'no-clipboard'}else{'clipboard'}
+    & $exe $package $evidence $temporary $clipboardMode
     if ($LASTEXITCODE -ne 0) { throw 'UI catalog regression failed; see ui-verification.json' }
-    Write-Output 'PASS actual C++ UI: 21 complete presets and 6 long Chinese prompt copy/save tests'
+    Write-Output ('PASS actual C++ UI: exact edition preset availability and all offered long Chinese prompts; clipboard tested: '+(-not $SkipClipboard))
 } finally {
     $resolved = [IO.Path]::GetFullPath($temporary)
     $parent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')

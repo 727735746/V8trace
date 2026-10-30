@@ -11,8 +11,8 @@ using System.Windows.Forms;
 
 namespace V8Trace {
     public sealed partial class TraceWindow : Form {
-        readonly Color ink = Color.FromArgb(25, 42, 61);
-        readonly Color accent = Color.FromArgb(0, 117, 120);
+        Color ink = CyberPalette.Text;
+        Color accent = CyberPalette.Cyan;
         readonly WorkerClient worker = new WorkerClient();
         readonly JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 8 * 1024 * 1024 };
         readonly Dictionary<string, CheckBox> channels = new Dictionary<string, CheckBox>();
@@ -82,7 +82,7 @@ namespace V8Trace {
         readonly DataGridView grid = new DataGridView { Name = "EventsGrid", Dock = DockStyle.Fill };
         readonly RichTextBox details = new RichTextBox { Name = "EventDetails", Dock = DockStyle.Fill, ReadOnly = true, WordWrap = false };
         readonly RichTextBox summaryText = new RichTextBox { Name = "SummaryText", Dock = DockStyle.Fill, ReadOnly = true, WordWrap = true };
-        readonly TabControl config = new TabControl { Name = "ConfigTabs", Dock = DockStyle.Fill };
+        readonly TabControl config = new CyberWorkspaceTabs { Name = "ConfigTabs", Dock = DockStyle.Fill };
         readonly ComboBox transport = new ComboBox { Name = "TransportInput", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
         readonly ComboBox preset = new ComboBox { Name = "PresetInput", DropDownStyle = ComboBoxStyle.DropDownList, DropDownWidth = 320 };
         readonly Button applyPreset = new Button { Name = "ApplyPresetButton", Text = "一键应用", Enabled = false };
@@ -108,11 +108,15 @@ namespace V8Trace {
         string captureDirectory;
         string casePromptRequestId;
         DateTime started;
+        int messagePumpDepth;
+        bool previewRenderPending;
         bool recordingAvailable, recordingReady, recordingPaused, recordingSettled, stoppingCapture;
         long recordingGeneration = -1, recordingMilliseconds = -1;
         string recordingRequestId, captureRequestId;
 
-        public TraceWindow() {
+        public TraceWindow() : this(ThemePreferences.DefaultPath) { }
+        public TraceWindow(string themeSettingsFile) {
+            themePreferences = ThemePreferences.Load(themeSettingsFile);
             Text = "V8 Trace Studio · 浏览器采集器 · 作者 Alcohol";
             Name = "V8TraceWindow";
             Size = new Size(1280, 860);
@@ -123,6 +127,7 @@ namespace V8Trace {
             AutoScaleMode = AutoScaleMode.Dpi;
             BuildWindow();
             BuildConfigurationTab();
+            FinishCyberWindow();
             chrome.Text = FindChrome();
             NewOutput();
             start.Enabled = false;
@@ -133,7 +138,7 @@ namespace V8Trace {
                 timer.Start();
             };
             FormClosing += ClosingWindow;
-            FormClosed += (sender, args) => { timer.Stop(); mcpService.Dispose(); worker.Dispose(); };
+            FormClosed += (sender, args) => { timer.Stop(); themeAnimation.Stop(); themeAnimation.Dispose(); CancelLogScan(); if (compactMetricFont != null) compactMetricFont.Dispose(); if (fullMetricFont != null) fullMetricFont.Dispose(); mcpService.Dispose(); worker.Dispose(); };
         }
 
         static NumericUpDown Number(string name, decimal value, decimal min, decimal max) {
@@ -149,25 +154,14 @@ namespace V8Trace {
         }
 
         void BuildWindow() {
-            var root = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(18, 0, 18, 0) };
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 83));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
-            var header = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(2, 12, 2, 10) };
-            header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 60)); header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40));
-            header.Controls.Add(new Label { Text = "V8 TRACE  /  浏览器采集", Font = new Font("Microsoft YaHei UI", 20F, FontStyle.Bold), ForeColor = ink, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
-            phase.ForeColor = accent; phase.TextAlign = ContentAlignment.MiddleRight; header.Controls.Add(phase, 1, 0);
-            root.Controls.Add(header, 0, 0);
             var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2 };
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 365)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             BuildConfig();
-            var left = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
-            left.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
-            left.Controls.Add(config, 0, 0); left.Controls.Add(BuildCaptureActions(), 0, 1);
+            var left = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 };
+            left.RowStyles.Add(new RowStyle(SizeType.Absolute, 38)); left.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 54));
+            left.Controls.Add(captureSection, 0, 0); left.Controls.Add(config, 0, 1); left.Controls.Add(BuildCaptureActions(), 0, 2);
             body.Controls.Add(left, 0, 0); body.Controls.Add(BuildEvidence(), 1, 0);
-            root.Controls.Add(body, 0, 1);
-            footer.Text = "CDP / 非 CDP 双模式 · 原生执行与网络诊断分别注明记录范围";
-            footer.ForeColor = Color.FromArgb(83, 100, 116); root.Controls.Add(footer, 0, 2); Controls.Add(root);
+            BuildCyberWindow(body);
         }
 
         TableLayoutPanel SettingsPanel(TabPage tab) {
@@ -206,6 +200,7 @@ namespace V8Trace {
             Row(tcpSettings, new Label { Text = "接收端命令：\nruntime/v8trace-runtime receive --root ./received --bind 127.0.0.1 --port 17880\n\n跨机器时指定监听地址和 --token-file。TCP 是明文通道，请放在可信网络或加密隧道内。浏览器 profile 不传输，完整原始 trace、日志和正文均传输。当前是保存后传输，不是 Chromium 直接推流。", ForeColor = ink }, 240);
             tcpSend.Click += (sender, args) => SendTcp();
             var settings = SettingsPanel(basic);
+            BuildGuidedWorkflow(settings);
             Row(settings, new Label { Text = "场景组合（选择后点击一键应用）", ForeColor = ink, TextAlign = ContentAlignment.BottomLeft }, 28);
             var presetRow = new TableLayoutPanel { ColumnCount = 2, Margin = new Padding(0) };
             presetRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); presetRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));
@@ -370,6 +365,8 @@ namespace V8Trace {
                 "阶段：" + Value(choice.Record, "stage") + " / 开销：" + Value(choice.Record, "risk") + "\n" + Value(choice.Record, "purpose") + "\n\n要求：" + Value(choice.Record, "requirement") + "\n" + Value(choice.Record, "outputs") + "\n\n推荐：" + Count(ObjectValue(choice.Record, "options"), "durationSeconds") + " 秒 / " + (Count(ObjectValue(choice.Record, "options"), "maxBytes") / 1048576) + " MiB。应用后仍可逐项调整。" +
                 (RequiresScriptScope(choice) ? "\n必须填写具体目标脚本范围；修改目标后重新应用。仅约束 JSCall/Native 与定向闭包，不约束 Env Hook、原生环境专项、HTTP、Opcode 或 WASM。" : "");
             if (!PresetAvailable(choice)) presetHint.Text = "此组合包含 Professional 专业采集项；当前配置保持原样。Community 的两种补环境组合完整可用。\n\n" + presetHint.Text;
+            if (choice != null && ObjectValue(choice.Record, "contract") != null)
+                presetHint.AppendText("\n\n预设契约（默认值；实际配置以启动预检为准）：\n" + Pretty(ObjectValue(choice.Record, "contract")));
         }
         void ApplyPreset() {
             if (!ready || busy) return;
@@ -416,7 +413,7 @@ namespace V8Trace {
                 ApplyTransportAvailability();
                 UpdateDetailFilters();
                 presetStatus.Text = "已应用：" + choice.ToString();
-                summaryText.Text = "场景：" + choice.ToString() + "\n\n" + presetHint.Text + "\n\n已完整替换通道、调用范围、JSCall 值模式、Native 子类、对象及写入预算；导入配置中的未呈现高级字段不继承。网址、日志/案例目录、无头模式和表达式保留。点击开始采集后生效，结束后手动导出案例。";
+                summaryText.Text = "场景：" + choice.ToString() + "\n\n" + presetHint.Text + "\n\n已完整替换通道、调用范围、JSCall 值模式、Native 子类、对象及写入预算；导入配置中的未呈现高级字段不继承。网址、日志/案例目录、无头模式、随停随开/初始暂停和表达式保留；实际生产者与预算以启动预检为准。点击开始采集后生效，结束后手动导出案例。";
             } catch (Exception error) { activePreset = null; presetStatus.Text = "预设应用错误 · 请检查当前选项"; ShowError(error.Message); }
             finally { applyingPreset = false; }
         }
@@ -472,8 +469,8 @@ namespace V8Trace {
         }
 
         Control BuildEvidence() {
-            var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1, Padding = new Padding(12, 0, 0, 0) };
-            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 91)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); right.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
+            var right = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Padding = new Padding(12, 0, 0, 0) };
+            right.RowStyles.Add(new RowStyle(SizeType.Absolute, 88)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 42)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 36)); right.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); right.RowStyles.Add(new RowStyle(SizeType.Absolute, 45));
             var metrics = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, BackColor = Color.White, Padding = new Padding(12, 7, 12, 7) };
             string[] names = { "规范化事件", "已记录数据", "关键缺口", "运行时间" }; Label[] labels = { eventCount, byteCount, gapCount, elapsed };
             for (int i = 0; i < 4; i++) {
@@ -486,14 +483,18 @@ namespace V8Trace {
             category.Items.AddRange(new object[] { "全部", "http", "script", "env", "jscall", "native", "opcode", "wasm", "lifecycle", "console", "exception", "websocket", "indexeddb", "cookie", "storage", "wasm-module", "vmp" }); category.SelectedIndex = 0;
             tools.Controls.Add(category); tools.Controls.Add(new Label { Text = "筛选", AutoSize = true, Margin = new Padding(8, 7, 3, 0) }); tools.Controls.Add(filter); tools.Controls.Add(refresh);
             category.SelectedIndexChanged += (sender, args) => RenderEvents(); filter.TextChanged += (sender, args) => RenderEvents(); refresh.Click += (sender, args) => ReadEvents(); right.Controls.Add(tools, 0, 1);
-            var tabs = new TabControl { Dock = DockStyle.Fill, Name = "EvidenceTabs" }; var logTab = new TabPage("实时事件 / 详情"); var summaryTab = new TabPage("采集摘要 / 缺口");
+            var tabs = new CyberWorkspaceTabs { Dock = DockStyle.Fill, Name = "EvidenceTabs" }; var logTab = new TabPage("实时事件 / 详情"); var summaryTab = new TabPage("采集摘要 / 缺口");
+            var evidenceNavigation = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0), Name = "EvidenceNavigation" };
+            foreach (var item in new[] { new Button { Name = "EvidenceLiveTab", Text = "实时事件 / 详情", Width = 142, Height = 30, Tag = 0 }, new Button { Name = "EvidenceSummaryTab", Text = "采集摘要 / 缺口", Width = 142, Height = 30, Tag = 1 } }) { var button = item; button.Click += delegate { tabs.SelectedIndex = (int)button.Tag; }; evidenceNavigation.Controls.Add(button); }
+            tabs.SelectedIndexChanged += delegate { StyleEvidenceNavigation(tabs); }; right.Controls.Add(evidenceNavigation, 0, 2);
             var split = new SplitContainer { Dock = DockStyle.Fill, Size = new Size(700, 520), Orientation = Orientation.Horizontal, SplitterDistance = 290, Panel1MinSize = 160, Panel2MinSize = 90 };
             ConfigureGrid(); split.Panel1.Controls.Add(grid); details.Font = new Font("Consolas", 9F); details.BackColor = Color.FromArgb(248, 250, 252); split.Panel2.Controls.Add(details); logTab.Controls.Add(split);
-            summaryText.Font = new Font("Microsoft YaHei UI", 10F); summaryTab.Controls.Add(summaryText); tabs.TabPages.Add(logTab); tabs.TabPages.Add(summaryTab); tabs.TabPages.Add(BuildIndexedTab()); tabs.TabPages.Add(BuildCausalityTab()); tabs.TabPages.Add(BuildMcpTab()); tabs.TabPages.Add(BuildCasePromptTab()); right.Controls.Add(tabs, 0, 2);
+            summaryText.Font = new Font("Microsoft YaHei UI", 10F); summaryTab.Controls.Add(BuildDiagnosticsPanel()); tabs.TabPages.Add(logTab); tabs.TabPages.Add(summaryTab); tabs.TabPages.Add(BuildIndexedTab()); tabs.TabPages.Add(BuildCausalityTab()); tabs.TabPages.Add(BuildMcpTab()); tabs.TabPages.Add(BuildCasePromptTab()); tabs.SelectedIndex = 0; right.Controls.Add(tabs, 0, 3);
             var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(0, 7, 0, 0), WrapContents = false }; actions.Controls.Add(load); actions.Controls.Add(open); actions.Controls.Add(export);
-            load.Click += (sender, args) => LoadCapture(); open.Click += (sender, args) => OpenDirectory(); export.Click += (sender, args) => ExportCapture(); right.Controls.Add(actions, 0, 3);
+            load.Click += (sender, args) => LoadCapture(); open.Click += (sender, args) => OpenDirectory(); export.Click += (sender, args) => ExportCapture(); right.Controls.Add(actions, 0, 4);
             return right;
         }
+        void StyleEvidenceNavigation(TabControl tabs) { foreach (var name in new[] { "EvidenceLiveTab", "EvidenceSummaryTab" }) foreach (Control control in Controls.Find(name, true)) { var button = (Button)control; var selected = (int)button.Tag == tabs.SelectedIndex; button.BackColor = selected ? CyberPalette.Selection : CyberPalette.Input; button.ForeColor = selected ? CyberPalette.Readable(CyberPalette.Primary, CyberPalette.Selection) : CyberPalette.Muted; button.FlatAppearance.BorderColor = selected ? CyberPalette.Primary : CyberPalette.Border; } }
         TabPage BuildCasePromptTab() {
             var tab = new TabPage("案例提示词") { Name = "CasePromptTab", BackColor = Color.White };
             var panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(9) };
@@ -619,6 +620,7 @@ namespace V8Trace {
                 return options;
         }
         void StartCapture() {
+            if (logsDeleting) return;
             try {
                 var options = CaptureOptions();
                 if (!studioAvailable) throw new InvalidOperationException("界面与 C++ 内核版本不一致；请一同更新便携目录后再采集。");
@@ -626,11 +628,12 @@ namespace V8Trace {
             } catch (Exception error) { SetBusy(false); ShowError(error.Message); }
         }
         void StartCaptureNow(Dictionary<string, object> options) {
+            if (logsDeleting) return;
             try {
                 previews.Clear(); RenderEvents(); details.Clear(); summaryText.Clear(); started = DateTime.UtcNow; captureDirectory = null;
                 ClearViewer();
                 recordingReady = false; recordingPaused = startPaused.Checked; recordingGeneration = -1; recordingMilliseconds = -1; recordingSettled = false; stoppingCapture = false; recordingRequestId = null;
-                SetBusy(true); phase.Text = "正在启动 Chrome…"; captureRequestId = worker.Send("start", new Dictionary<string, object> { { "options", options } });
+                SetBusy(true); phase.Text = "正在启动 Chrome…"; guidedStatus.Text = "采集中；结束后先检查摘要 / 缺口，再显式导出案例。"; captureRequestId = worker.Send("start", new Dictionary<string, object> { { "options", options } });
             } catch (Exception error) { SetBusy(false); ShowError(error.Message); }
         }
         void SetBusy(bool value) {
@@ -649,6 +652,8 @@ namespace V8Trace {
             UpdateDetailFilters();
             StudioBusy();
             ApplyEditionAvailability();
+            UpdateLogActions();
+            UpdateGuidedActions();
         }
         void Send(string command, Dictionary<string, object> fields = null) { try { worker.Send(command, fields); } catch (Exception error) { ShowError(error.Message); } }
         void ToggleRecording() {
@@ -671,10 +676,12 @@ namespace V8Trace {
         }
         void Pump() {
             Dictionary<string, object> message;
-            for (int i = 0; i < 80 && worker.TryRead(out message); i++) HandleMessage(message);
+            ++messagePumpDepth;
+            try { for (int i = 0; i < 80 && worker.TryRead(out message); i++) HandleMessage(message); }
+            finally { if (--messagePumpDepth == 0 && previewRenderPending) { previewRenderPending = false; RenderEvents(); } }
             if (busy && captureRequestId != null) elapsed.Text = (recordingMilliseconds >= 0 ? TimeSpan.FromMilliseconds(recordingMilliseconds) : DateTime.UtcNow - started).ToString(@"hh\:mm\:ss");
-            if (!worker.Alive && !closing && !exitedReported) { exitedReported = true; ready = false; SetBusy(false); ShowError("采集内核已退出；已有证据保留在日志目录。请重新启动软件。"); }
-            if (closing && !worker.Alive && !mcpService.Active) { closing = false; Close(); }
+            if (worker.OutputDrained && !closing && !exitedReported) { exitedReported = true; ready = false; SetBusy(false); ShowError("采集内核已退出；已有证据保留在日志目录。请重新启动软件。"); }
+            if (closing && worker.OutputDrained && !mcpService.Active) { closing = false; Close(); }
         }
         void HandleMessage(Dictionary<string, object> message) {
             var type = Value(message, "type");
@@ -716,7 +723,8 @@ namespace V8Trace {
                 var state = Value(message, "phase"); phase.Text = state == "permissions" ? "检查并补齐 Chromium 沙箱权限" : state == "launching" ? "启动 Chrome" : state == "connecting" ? "配置 CDP 通道" : state == "capturing" ? "采集中" : state == "draining" ? "停止并保存证据" : state == "correlating" ? "生成关联证据索引" : state;
                 if (state == "paused") phase.Text = "已暂停采集 · 浏览器继续运行"; else if (state == "pausing") phase.Text = "正在暂停并刷盘…"; else if (state == "resuming") phase.Text = "正在开启采集…";
                 eventCount.Text = Count(message, "eventCount").ToString("N0"); byteCount.Text = (Count(message, "recordedBytes") / 1048576.0).ToString("N1") + " MiB"; gapCount.Text = Count(message, "criticalGapCount").ToString();
-                footer.Text = "界面显示最近 1000 条预览；完整日志保留在目录中 · 预览跳过 " + Count(message, "droppedPreviews") + " 条（非采集丢失）";
+                var queue = worker.QueueMetrics;
+                footer.Text = "界面显示最近 1000 条预览；完整日志保留在目录中 · 预览跳过 " + Count(message, "droppedPreviews") + " 条（非采集丢失） · UI 排队 " + Count(queue, "pendingMessages") + " 条 / " + (Count(queue, "pendingUtf16Bytes") / 1048576.0).ToString("N1") + " MiB UTF-16";
             } else if (type == "events") {
                 if (Value(message, "replace") == "True") previews.Clear();
                 object items; if (message.TryGetValue("events", out items)) foreach (var item in (System.Collections.IEnumerable)items) { var record = item as Dictionary<string, object>; if (record != null) previews.Add(record); }
@@ -733,7 +741,7 @@ namespace V8Trace {
             } else if (type == "transferred") {
                 SetBusy(false); tcpStatus.Text = "完整传输并通过 SHA-256 校验"; phase.Text = "TCP 传输完成 · 本地证据保留";
                 summaryText.Text = Pretty(ObjectValue(message, "summary"));
-            } else if (type == "exported") { SetBusy(false); phase.Text = "案例已导出 · 入口待配置"; summaryText.Text = "导出目录：" + Value(message, "output") + "\n\n" + Pretty(ObjectValue(message, "summary")); }
+            } else if (type == "exported") { SetBusy(false); guidedStatus.Text = "案例已导出；按原始引用与完整性核对，后续入口仍需配置。"; phase.Text = "案例已导出 · 入口待配置"; summaryText.Text = "导出目录：" + Value(message, "output") + "\n\n" + Pretty(ObjectValue(message, "summary")); }
             else if (type == "stopping") { if (busy) { stoppingCapture = true; phase.Text = "停止请求已发送，正在保存…"; stop.Enabled = false; recordingReady = false; pauseRecording.Enabled = false; } }
             else if (type == "error") { var summary = ObjectValue(message, "summary"); if (summary != null) { captureDirectory = Value(message, "output"); ShowSummary(summary); } SetBusy(false); ShowError(Value(message, "error")); }
             else if (type == "worker-stderr") { summaryText.AppendText("\n内核输出：" + Value(message, "error")); }
@@ -752,7 +760,10 @@ namespace V8Trace {
             if (summary == null) return;
             var integrity = Value(summary, "integrityConclusion"); phase.Text = Value(summary, "captureConclusion") == "failed" ? "采集失败 · 证据已保留" : integrity == "partial" ? "已保存 · 存在关键缺口" : "采集完成 · 证据已保存";
             eventCount.Text = Count(summary, "eventCount").ToString("N0"); byteCount.Text = (Count(summary, "recordedBytes") / 1048576.0).ToString("N1") + " MiB"; gapCount.Text = Count(summary, "criticalGapCount").ToString();
-            summaryText.Text = "日志目录：" + captureDirectory + "\n\n" + Pretty(summary); footer.Text = "采集结束不等于网站业务成功；查看摘要中的实际能力、精度与缺口。";
+            summaryText.Text = "日志目录：" + captureDirectory + "\n\n" + Pretty(summary) + "\n\n界面消息队列（非采集完整性；字节为 UTF-16 字符串载荷）：\n" + Pretty(worker.QueueMetrics); footer.Text = "采集结束不等于网站业务成功；查看摘要中的实际能力、精度与缺口。";
+            ShowCaptureDiagnostics(summary);
+            guidedStatus.Text = Value(summary, "captureConclusion") == "failed" ? "采集失败，先核对摘要与保留证据；不自动重试。" :
+                Value(summary, "integrityConclusion") == "partial" ? "存在关键缺口：先检查诊断与原始记录，再决定重采或导出。" : "证据状态以摘要为准；可查看或导出，采集结束不等于网站业务成功。";
         }
         string Pretty(object value) {
             var text = json.Serialize(value); var result = new StringBuilder(); int depth = 0; bool quoted = false, escaped = false;
@@ -767,6 +778,7 @@ namespace V8Trace {
             return result.ToString();
         }
         void RenderEvents() {
+            if (messagePumpDepth > 0) { previewRenderPending = true; return; }
             var previous = grid.SelectedRows.Count > 0 ? grid.SelectedRows[0] : null;
             string selectedSequence = previous != null ? Value(previous.Tag as Dictionary<string, object>, "seq") : "";
             bool following = previous == null || previous.Index == grid.Rows.Count - 1;
@@ -788,7 +800,7 @@ namespace V8Trace {
             try { worker.Send(command, fields); } catch (Exception error) { SetBusy(false); ShowError(error.Message); }
         }
         void ReadEvents() { if (captureDirectory == null) return; string selected = category.SelectedItem as string; if (selected == "全部") { phase.Text = "请选择一个日志类别再读取尾部"; return; } BeginEvidenceCommand("events", "正在读取日志尾部…", new Dictionary<string, object> { { "capture", captureDirectory }, { "category", selected }, { "limit", 200 } }); }
-        void LoadCapture() { using (var dialog = new OpenFileDialog { Filter = "采集摘要|summary.json", Title = "选择已有采集包的 summary.json" }) if (dialog.ShowDialog(this) == DialogResult.OK) BeginEvidenceCommand("inspect", "正在载入采集摘要…", new Dictionary<string, object> { { "capture", Path.GetDirectoryName(dialog.FileName) } }); }
+        void LoadCapture() { if (logsDeleting) return; using (var dialog = new OpenFileDialog { Filter = "采集摘要|summary.json", Title = "选择已有采集包的 summary.json" }) if (dialog.ShowDialog(this) == DialogResult.OK) BeginEvidenceCommand("inspect", "正在载入采集摘要…", new Dictionary<string, object> { { "capture", Path.GetDirectoryName(dialog.FileName) } }); }
         void OpenDirectory() { if (captureDirectory != null && Directory.Exists(captureDirectory)) Process.Start(new ProcessStartInfo(captureDirectory) { UseShellExecute = true }); }
         void ExportCapture() {
             var destination = exportOutput.Text.Trim();
@@ -823,10 +835,11 @@ namespace V8Trace {
         }
         void ShowError(string error) { phase.Text = "操作错误 · 查看摘要"; summaryText.AppendText("\n错误：" + error + "\n"); footer.Text = error; }
         void ClosingWindow(object sender, FormClosingEventArgs args) {
-            if (!worker.Alive && !mcpService.Active) return;
+            if (StopLogCleanupForClose(args)) return;
+            if (worker.OutputDrained && !mcpService.Active) return;
             if (busy && !closing && MessageBox.Show(this, "任务正在运行。停止并保留已有证据后退出？", "退出 V8 Trace", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) { args.Cancel = true; return; }
             args.Cancel = true;
-            if (!closing) { closing = true; phase.Text = "正在保存并退出…"; StopMcp(); if (worker.Alive) Send("shutdown"); }
+            if (!closing) { closing = true; UpdateThemeAnimation(); phase.Text = "正在保存并退出…"; StopMcp(); if (worker.Alive) Send("shutdown"); }
         }
     }
 

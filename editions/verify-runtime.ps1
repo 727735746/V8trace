@@ -1,14 +1,16 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$BuildRoot,
     [string]$DependencyRoot,
     [string]$MsvcEnvironment,
+    [string]$WorkspacePlan,
     [ValidateSet('community','professional')][string[]]$Editions = @('community','professional'),
     [ValidateRange(1,4)][int]$Jobs = 1
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 . (Join-Path $PSScriptRoot 'runtime-identity.ps1')
+. (Join-Path $PSScriptRoot 'artifact-tools.ps1')
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $build=[IO.Path]::GetFullPath($BuildRoot)
 if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
@@ -28,16 +30,32 @@ if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
 }
 $env:PYTHONDONTWRITEBYTECODE='1';$env:PYTHONUTF8='1';$env:VSLANG='1033'
 $encoding=[Text.UTF8Encoding]::new($false)
-New-Item -ItemType Directory -Path $build -Force | Out-Null
 foreach($edition in $Editions) {
     $edition=$edition.ToLowerInvariant();$directory=Join-Path $build $edition
-    New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    if($WorkspacePlan){Invoke-V8TraceBuildTool -Tool workspace_plan -Arguments @('check-consumer','--plan',$WorkspacePlan,'--root',$directory,'--source',$root,'--edition',$edition)}
+    else {Invoke-V8TraceBuildTool -Tool workspace_plan -Arguments @('init-host','--root',$directory,'--source',$root,'--edition',$edition,'--jobs',[string]$Jobs)}
+    $lease=Open-V8TraceHostLease -Root $directory
+    try {
     $attempt=Join-Path $directory ('verification-'+[guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $attempt | Out-Null
+    $inputs=Join-Path $attempt 'source-inputs.json'
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('snapshot','--source',$root,'--edition',$edition,'--output',$inputs)
+    $priorDependencies=$null
+    if($DependencyRoot){
+        $priorDependencies=Join-Path $attempt 'dependencies-before-configure.json'
+        Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('dependencies','--dependency-root',$DependencyRoot,'--compiler',(Get-Command cl.exe -CommandType Application).Source,'--output',$priorDependencies)
+    } elseif(Test-Path -LiteralPath (Join-Path $directory 'CMakeCache.txt')){
+        $priorDependencies=Join-Path $attempt 'dependencies-before-configure.json'
+        Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('dependencies','--build',$directory,'--output',$priorDependencies)
+    }
     $args=@('-S',(Join-Path $root 'runtime-cpp'),'-B',$directory,'-G','Ninja','-DCMAKE_BUILD_TYPE=Release',('-DV8TRACE_EDITION='+$edition))
     if($DependencyRoot){foreach($name in @('json','zlib','brotli','zstd','ixwebsocket','sqlite','abseil','re2')){$source=[IO.Path]::GetFullPath((Join-Path $DependencyRoot ('_deps\'+$name+'-src')));if(-not(Test-Path -LiteralPath $source -PathType Container)){throw ('缺少可复用依赖源：'+$source)};$args+=('-DFETCHCONTENT_SOURCE_DIR_'+$name.ToUpperInvariant()+'='+$source)}}
     & cmake @args *> (Join-Path $attempt 'configure.log')
     if($LASTEXITCODE -ne 0){throw ('配置失败，见 '+$attempt+'\configure.log')}
+    if($priorDependencies){Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-dependencies','--dependencies',$priorDependencies)}
+    $dependencies=Join-Path $attempt 'dependency-inputs.json'
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('dependencies','--build',$directory,'--output',$dependencies)
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-source','--snapshot',$inputs,'--scope','runtime')
     & cmake --build $directory --parallel $Jobs *> (Join-Path $attempt 'build.log')
     if($LASTEXITCODE -ne 0){throw ('编译失败，见 '+$attempt+'\build.log')}
     $report=Join-Path $attempt 'ctest.xml'
@@ -45,12 +63,18 @@ foreach($edition in $Editions) {
     if($LASTEXITCODE -ne 0){throw ('测试失败，见 '+$attempt+'\ctest.log')}
     [xml]$tests=Get-Content -LiteralPath $report -Raw -Encoding UTF8
     if([int]$tests.testsuite.tests -lt 1 -or [int]$tests.testsuite.failures -ne 0 -or [int]$tests.testsuite.disabled -ne 0){throw 'CTest 门槛未全部执行通过。'}
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-source','--snapshot',$inputs,'--scope','runtime')
     $runtime=Join-Path $directory 'v8trace-runtime.exe'
     $identity=Get-V8TraceRuntimeIdentity -Runtime $runtime
     if($identity.edition.id -ne $edition -or $identity.edition.protocol -ne 'v8trace/edition/1'){throw '实际内核身份不匹配。'}
     [IO.File]::WriteAllText((Join-Path $attempt 'runtime-version.json'),($identity | ConvertTo-Json -Depth 6),$encoding)
+    $boundReceipt=Join-Path $attempt 'runtime-acceptance.json'
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('runtime-receipt','--snapshot',$inputs,'--dependencies',$dependencies,'--runtime',$runtime,'--junit',$report,'--output',$boundReceipt)
     $receipt=[ordered]@{protocol='v8trace/edition-verification/1';edition=$edition;status='host-tests-passed';testCount=[int]$tests.testsuite.tests;testReport=$report;runtime=$runtime;runtimeSha256=(Get-FileHash -LiteralPath $runtime).Hash.ToLowerInvariant();nativeBrowserValidated=$false;build=$directory;finishedAt=[DateTimeOffset]::UtcNow.ToString('o')}
+    $receipt.boundRuntimeAcceptance=$boundReceipt
+    $receipt.boundRuntimeAcceptanceSha256=(Get-FileHash -LiteralPath $boundReceipt).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $directory 'verification.json'),($receipt | ConvertTo-Json -Depth 6),$encoding)
     [IO.File]::WriteAllText((Join-Path $attempt 'verification.json'),($receipt | ConvertTo-Json -Depth 6),$encoding)
     [pscustomobject]$receipt | ConvertTo-Json -Depth 6
+    } finally {$lease.Dispose()}
 }

@@ -50,7 +50,7 @@ public static class CppUiTcpSmoke {
                 if(stage==0&&Find<Button>(form,"StartButton").Enabled) {
                     Check(Find<Label>(form,"PhaseLabel").Text.Contains("C++"),"C++ worker not active");
                     Check(Find<CheckedListBox>(form,"NativeKindsInput").Items.Count==7,"Native filters missing");
-                    Check(Find<TabControl>(form,"ConfigTabs").TabPages.Contains(Find<TabPage>(form,"TcpTransferTab"))&&Find<TabControl>(form,"ConfigTabs").TabPages.Contains(Find<TabPage>(form,"ConfigurationTab")),"TCP/configuration tabs missing");
+                    Check(Find<TabControl>(form,"ConfigTabs").TabPages.Contains(Find<TabPage>(form,"TcpTransferTab"))&&Find<TabControl>(form,"WorkspaceTabs").TabPages.Contains(Find<TabPage>(form,"ConfigurationTab")),"TCP/configuration tabs missing");
                     Check(Find<NumericUpDown>(form,"WriteBufferInput").Value==8&&Find<NumericUpDown>(form,"WriteBatchInput").Value==1024,"Lossless buffer defaults missing");
                     var calls=Find<CheckBox>(form,"Channel_jsCallDetail");var values=Find<CheckBox>(form,"JsCallValuesOption");var filtering=Find<CheckBox>(form,"DetailFilteringOption");
                     Check(values.Checked,"Full JSCall values must remain the default");calls.Checked=true;Check(values.Enabled,"JSCall values option disabled");filtering.Checked=true;

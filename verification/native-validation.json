@@ -1,0 +1,32 @@
+{
+  "protocol": "v8trace/community-native-validation/1",
+  "conclusion": "PASS",
+  "edition": "community",
+  "runtimeSha256": "f4b961795e19136ad2ee342b38890d9047328d54859393f4849fc033ba5c4717",
+  "binaryHashes": {
+    "chrome.exe": "c069566b77f76995ef751792d079c83fcceffc4dcb62977d4b061b0ade8997e2",
+    "chrome.dll": "39e59197bb14babb79f0d41f40ecc3294e9e74b859bb98cd83193b345861d539",
+    "chrome_elf.dll": "0d9673b99e323869330019f8ff41c2dec93d3ff1becb27a43a5f2000a6ca334d",
+    "v8_context_snapshot.bin": "78182404e58fdf2cdc72447306e9c67319e306df47e53ace85eaf8b7f7b63483"
+  },
+  "descriptorSha256": "c4a5cdae47d03f6a8a6fa41b0358784747c558103aafdedbd67a4e9de46dea93",
+  "sourceProjectionSha256": "d3102a3e6a0e2438e59a76f987273f73508ee5a363903e357cd7b0c8cdfe39b1",
+  "playbackValidated": true,
+  "encodingValidated": true,
+  "actualFinalAcceptance": {
+    "path": "F:\\project\\chrome_envs\\artifacts\\v8trace-publication-20261030\\q011-final-community-1-state.json",
+    "bytes": 1227695,
+    "sha256": "0c9533004ecf6e95e5748eca18e4a12bb303f4dde64d69b5ffa58818d8df523d"
+  },
+  "actualMatrix": {
+    "path": "F:\\project\\chrome_envs\\artifacts\\v8trace-publication-20261030\\q011-final-community-1-matrix\\result.json",
+    "bytes": 5568,
+    "sha256": "6f648fb3f4f0e6438c935e33d9222c9b6c90af9ce2db9a6657552fd6ea22394a"
+  },
+  "actualMedia": {
+    "path": "F:\\project\\chrome_envs\\artifacts\\v8trace-publication-20261030\\q011-final-community-1-media\\result.json",
+    "bytes": 4831,
+    "sha256": "9b4772d13f0d0a25803397a3f8eb8fbd7a9d39a34641f88ac8a1c10f9130934a"
+  },
+  "scope": "actual final-location Windows x64 finite fixture coverage; not publication or arbitrary site/server acceptance"
+}

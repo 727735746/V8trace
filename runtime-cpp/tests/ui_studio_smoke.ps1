@@ -60,8 +60,8 @@ public static class StudioSmoke {
                         Check(json.Serialize(first)==json.Serialize(raw),"Exact import/export: relative paths, missing keys, byte budget, unknown Chinese field");
                         Find<NumericUpDown>(form,"DurationInput").Value=11;var changed=(Dictionary<string,object>)Invoke(form,"PortableOptions");Check(Convert.ToInt32(changed["durationSeconds"])==11&&Convert.ToInt64(changed["maxBytes"])==123456789L,"Only changed control overwrites imported precision");
                         Invoke(form,"SetBusy",true);Check(!Find<TextBox>(form,"VmpProbeFileInput").Enabled&&!Find<Button>(form,"ConfigImportButton").Enabled,"Busy configuration and VM inputs locked");Invoke(form,"SetBusy",false);
-                        Find<TabControl>(form,"ConfigTabs").SelectedTab=Find<TabPage>(form,"ConfigurationTab");Find<Button>(form,"ConfigCurrentButton").PerformClick();Snapshot(form,"configuration-1280.png");
-                        Set(form,"captureDirectory",capture);Find<TabControl>(form,"EvidenceTabs").SelectedTab=Find<TabPage>(form,"IndexedEvidenceTab");Invoke(form,"BuildIndex");stage=1;
+                        Find<TabControl>(form,"WorkspaceTabs").SelectedTab=Find<TabPage>(form,"ConfigurationTab");Find<Button>(form,"ConfigCurrentButton").PerformClick();Snapshot(form,"configuration-1280.png");
+                        Set(form,"captureDirectory",capture);Find<TabControl>(form,"WorkspaceTabs").SelectedTab=Find<TabPage>(form,"IndexedEvidenceTab");Invoke(form,"BuildIndex");stage=1;
                     }else if(stage==1&&Idle(form)&&Find<DataGridView>(form,"IndexGrid").Rows.Count==3){
                         Check(Field(form,"viewerGeneration")!=null&&Find<RichTextBox>(form,"IndexedDetails").Text.Length>10,"Real indexed read rendered");Find<ComboBox>(form,"IndexCategoryInput").Text="jscall";Invoke(form,"QueryIndex",false);stage=2;
                     }else if(stage==2&&Idle(form)){

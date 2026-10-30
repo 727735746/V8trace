@@ -1,94 +1,22 @@
-V8 Trace 编译指令（Windows x64，UTF-8 中文，2026-10-27）
+社区版软件与定制 Chromium 编译指令（UTF-8 中文，作者 Alcohol）
 
-双版本补充（2026-10-28）：
-  在 x64 Native Tools PowerShell 中，进入 v8-trace 目录：
-  .\build-cpp.ps1 -Edition community -BuildRoot G:\v8-trace-build\community-host -OutputPath .\dist\V8Trace-Community -Jobs 1
-  .\build-cpp.ps1 -Edition professional -BuildRoot G:\v8-trace-build\professional-host -OutputPath .\dist\V8Trace-Professional -Jobs 1
-  省略 -NativeChromePath 为 host-only；提供浏览器时强制核验其哈希和版本配对。
-  社区浏览器需独立社区补丁及原生验收；分版前完整浏览器归 Professional，不拿来冒充 Community。
-  Community 的两种补环境组合及完整目标 JSCall/Native 原始值保留，专业版维持完整能力。
-  功能、Apache-2.0 及实际剩余门槛见 editions\版本拆分说明.md。
+在配置好 Visual Studio C++、Windows SDK、Python 3.10+、PowerShell 7、depot_tools 的 Windows x64 开发者终端执行。
+先准备 native/community-source.json 固定的完整 Chromium/V8/Perfetto 源码及依赖，再执行：
 
-一、当前候选与构建条件
-  F:\project\chrome_envs\v8-trace\dist\V8Trace-HTTPRoot-Candidate-20261027-R7\V8Trace.exe
-  同目录 chromium\chrome.exe 为配套定制浏览器，runtime\v8trace-runtime.exe 为 C++ 内核。
-  运行软件不需要 Node / Python；WinForms 界面使用 Windows .NET Framework。
-  Python、CMake、Ninja、depot_tools、VS C++ x64、Windows SDK 仅为构建/测试条件。
-  本轮实际使用 VS 2026、Windows SDK 10.0.26100.0、Jobs=1。
-  本地 Windows 样本验收不代替 macOS、任意网站或算法复现验收。
-  结果、哈希、回滚位置见《完整链路验收与交接-20261027.md》。
-  本轮不执行签名、信任根导入、Git 提交/推送或远端发行。
+python -B .\native\build_community_chrome.py --checkout G:\chromium-community\src --out-name V8TraceCommunity --evidence G:\chromium-community\build-evidence --jobs 1
 
-二、定制 Chromium：独立编译命令
-在 F:\project\chrome_envs 的 PowerShell 中执行：
-  Set-Location F:\project\chrome_envs
+该入口执行独立社区补丁应用、GN、构建图同步、链接器单线程保护、实际 Ninja 编译和原生身份/运行文件清单生成。
+媒体配置包含 H264/AAC、Chrome FFmpeg、OpenH264、FFmpeg 和 libvpx；编译成功不计作实际播放/编码通过。
 
-固定版本：
-  Chromium: 2903d8558c752b5a554a1a47b4ea7219ba1a31ef
-  V8:       792d9716fea48312ad7ce4413c538e00628b1d50
-  源码/缓存: G:\v8-trace-build\src
-  输出:      G:\v8-trace-build\src\out\V8TraceProbe
-  本轮证据:  artifacts/v8-trace-http-root-20261025/r7
+随后构建软件并按运行清单加入配套浏览器：
+python -B .\editions\stage-native-runtime.py --source G:\chromium-community\src\out\V8TraceCommunity --output F:\native-runtime-community --edition community
+.\build.ps1 -Edition community -NativeChromePath F:\native-runtime-community\chrome.exe -BuildRoot .\.cache\community -OutputPath .\dist\V8Trace-Community -Jobs 1
 
-当前 G 盘源码已受控接入本轮补丁，直接增量 Build，不重复 Sync / Configure：
-  pwsh -NoProfile -File .\v8-trace\native\build-chromium.ps1 -Stage Build -Target chrome -BuildRoot G:\v8-trace-build -OutName V8TraceProbe -EvidencePath artifacts/v8-trace-http-root-20261025/r7 -Jobs 1 -Detailed -BrowserChannels
-  if ($LASTEXITCODE -ne 0) { throw 'Chrome 构建失败；检查原始构建回执，此时不打包' }
+staging 只复制描述文件绑定的完整运行清单，不复制 GN 对象/缓存，不创建硬链接；先检查容量与活动构建所有者，再创建全新目录。复制成功不代表原生或媒体运行通过。
 
-成功后生成匹配的浏览器身份与运行文件清单：
-  pwsh -NoProfile -File .\v8-trace\native\build-chromium.ps1 -Stage Package -Target chrome -BuildRoot G:\v8-trace-build -OutName V8TraceProbe -EvidencePath artifacts/v8-trace-http-root-20261025/r7 -Jobs 1 -Detailed -BrowserChannels
-  if ($LASTEXITCODE -ne 0) { throw 'Chrome Package 失败' }
+媒体合成样本和采集期播放/编码测试：
+python -B .\native\generate_media_fixtures.py --ffmpeg C:\tools\ffmpeg.exe --output G:\media-fixtures
+python -B .\native\media_browser.py --runtime .\dist\V8Trace-Community\runtime\v8trace-runtime.exe --assets .\dist\V8Trace-Community\app\v8-trace --chrome .\dist\V8Trace-Community\chromium\chrome.exe --edition community --headful --fixtures G:\media-fixtures --evidence G:\media-acceptance
 
-执行文件：
-  G:\v8-trace-build\src\out\V8TraceProbe\chrome.exe
-Package 在该目录生成 v8trace-opcode.json、v8trace-runtime-files.json。
-不复制 obj / 缓存 / PDB；下面的软件打包会按清单附带 Chrome。
-
-全新 checkout 或确实修改补丁时，单独选择新 EvidencePath，并先封存当前已应用补丁：
-  $Evidence = 'artifacts/v8-trace-next-' + (Get-Date -Format 'yyyyMMdd-HHmmss')
-  pwsh -NoProfile -File .\v8-trace\native\build-chromium.ps1 -Stage Configure -BuildRoot G:\v8-trace-build -OutName V8TraceProbe -EvidencePath $Evidence -Jobs 1 -Detailed -BrowserChannels
-已有补丁版本发生变更时还需显式 PreviousPatch，指向刚封存的旧 v8-opcode.patch。
-随后 Build / Package 使用相同 $Evidence；不覆盖或跳过未知源码修改。Sync 下载依赖仅在确有需要时单独执行。
-同一 checkout 只运行一个 Ninja，不改活动构建输入，不关闭用户应用来掩盖资源问题。
-Build 自动使用目标的传递依赖图，保留优化与插桩；Jobs=1 不等于所有内存状态都必定成功。
-
-d8 是独立辅助目标，不代替 Chrome 验收：
-  pwsh -NoProfile -File .\v8-trace\native\build-chromium.ps1 -Stage Build -Target d8 -BuildRoot G:\v8-trace-build -OutName V8TraceProbe -EvidencePath artifacts/v8trace-d8-next-unique -Jobs 1 -Detailed -BrowserChannels
-d8 的 EvidencePath 每次使用独立新路径，不覆盖 Chrome 回执；如先验证 d8，随后实际 Build chrome，再 Package。
-本轮 R7 仅改 Base 私有实现，V8 公共输入未变，原 d8 已验证记录保留；没有用旧 d8 冒充新 Chrome 验收。
-
-三、C++ 内核 + 可视化 EXE：独立编译命令
-在 VS x64 开发者 PowerShell 中进入项目目录。输出目录必须全新，旧包保持不变。
-
-仅编内核/界面，不附浏览器：
-  $Out = '.\v8-trace\dist\V8Trace-Host-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
-  pwsh -NoProfile -File .\v8-trace\build-cpp.ps1 -BuildRoot G:\v8-trace-build\runtime-mcp -OutputPath $Out -Jobs 1
-  if ($LASTEXITCODE -ne 0) { throw 'C++ / UI 构建或测试失败' }
-
-附带定制 Chromium 的完整软件：
-  $Out = '.\v8-trace\dist\V8Trace-Full-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')
-  pwsh -NoProfile -File .\v8-trace\build-cpp.ps1 -BuildRoot G:\v8-trace-build\runtime-mcp -OutputPath $Out -NativeChromePath G:\v8-trace-build\src\out\V8TraceProbe\chrome.exe -Jobs 1
-  if ($LASTEXITCODE -ne 0) { throw '软件与浏览器配套打包失败' }
-
-入口会构建全部测试目标并运行 CTest，按 GN 清单附带 Chrome，初始化 LPAC 读取/执行权限。
-本轮完整 CTest 为 29 项；编译/单测通过仍需新浏览器实际验收，新包保持候选身份。
-MSVC+Ninja 的构建期 Python launcher 将探测到的 include 前缀规范为 ASCII、诊断转为 UTF-8，保持真实头文件依赖；不改变 C++ 语义，运行软件不依赖它。
-UI 的 Chrome / 日志相对路径以 V8Trace.exe 所在目录为准；CLI 相对路径以启动它的工作目录为准。
-Chrome 默认英文；不通过关闭浏览器沙箱处理启动故障。
-
-四、实际无 CDP 样本验收
-每轮使用全新证据目录。以下仅运行本地服务与独立 HTTP oracle：
-  python -B .\v8-trace\runtime-cpp\tests\causality_browser_probe.py --runtime (Join-Path $Out 'runtime\v8trace-runtime.exe') --chrome (Join-Path $Out 'chromium\chrome.exe') --scenario finite --duration 45 --evidence ('G:\project\trace\finite-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-
-分别将 scenario 设为 default-off / pending / unread，使用各自的新目录。
-pending / unread 需要真实资源等待。unread 的两项 HTTP 未结束缺口及原 partial 必须保留。
-暂停/手动停止、预算、异常退出命令见交接文档；后两项若尚无 HTTP 根落盘，就记录“无链证明”。
-普通验收不附线程监视器，不设置诊断 flush 超时，不用浏览器自动化作复现兜底。
-CLI capture/import 的状态、错误、最终摘要直接写文件；UI/Worker/MCP 的机器协议管道保留。
-
-五、迭代与回滚
-  新包输出到 v8-trace/dist 的全新子目录，不覆盖 V8Trace-2.0.0-Windows-x64。
-  compiled-not-validated 仅是编译结果，不是网站或完整链路验收。
-  详细通道的 32 MiB 共享内存需匹配已编译的 v8trace/trace-transport/1 容量声明；旧/未知版本仍为 8 MiB。
-  原生 ACK 超时、丢包及未知 flush 继续作为缺口，不改 summary 使状态变绿。
-  回滚软件只需切回原稳定目录的 EXE；源码备份、完整哈希与清理残留见交接文档。
-  原始证据、失败记录、源码备份和活跃构建缓存保留。
+请使用全新输出及证据目录；阶段支持 apply/verify/configure/build/package。专业生产/分析实现不在社区源码中。
+完整解压后运行 V8Trace.exe；运行不需要 Node.js。源码和构建缓存不放入软件发行包。

@@ -2,6 +2,7 @@
 #include "v8trace/edition.h"
 #include "v8trace/state.h"
 #include "v8trace/vmp_probe.h"
+#include "v8trace/scenario_contract.h"
 #include <algorithm>
 #include <regex>
 
@@ -16,7 +17,7 @@ void supported(const Json& descriptor, std::string_view name, const std::string&
 std::vector<std::string> details(const Json& o) { std::vector<std::string> out; for (auto [key, channel] : std::vector<std::pair<std::string, std::string>>{{"jsCallDetail", "jscall"}, {"nativeDetail", "native"}, {"wasm", "wasm"}}) if (enabled(o, key)) out.push_back(channel); return out; }
 }
 Json presets(const fs::path& assets) {
-  auto catalog = load_json(assets / "scenario_presets.json", 1048576).at("presets");
+  auto catalog = scenario_catalog(assets).at("presets");
   for (auto& preset : catalog) {
     auto blocked = edition_blocked_options(preset.at("options"));
     preset["available"] = blocked.empty(); preset["restrictedOptions"] = blocked;
@@ -192,6 +193,12 @@ Json validate_options(Json input, const fs::path& assets, bool verify_browser) {
   }
   auto required = field(o, "require", Json::array()); if (required.is_string()) required = split(text(required), ','); require(required.is_array(), "require must be array or comma-separated text"); auto coverage = capabilities(o); for (auto& name : required) { auto value = str(coverage, text(name), "unavailable"); require(value != "disabled" && value != "unavailable", "Required capability unavailable: " + text(name)); }
   o["edition"] = edition_id();
+  o["scenarioContract"] = scenario_contract(o, assets);
+  o["scenarioContract"]["browserVerified"] = verify_browser;
+  if (field(o.at("scenarioContract"), "available") == true) for (const auto& dependency : o.at("scenarioContract").at("dependencies"))
+    require(dependency.at("satisfied") == true, "Scenario dependency missing: " + str(dependency, "code"));
+  if (field(o.at("scenarioContract"), "available") == true) for (const auto& producer : o.at("scenarioContract").at("requiredProducers"))
+    require(producer.at("satisfied") == true, "Scenario producer unavailable: " + str(producer, "capability"));
   return o;
 }
 Json capabilities(const Json& o) { const bool native = str(o, "transport") == "native"; Json out; auto set = [&](std::string key, bool active, std::string value) { out[key] = active ? value : "disabled"; };

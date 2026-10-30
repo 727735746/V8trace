@@ -1,5 +1,6 @@
 #include "v8trace/studio.h"
 #include "v8trace/edition.h"
+#include "v8trace/scenario_contract.h"
 #include <algorithm>
 
 namespace v8trace {
@@ -86,11 +87,18 @@ Json preflight_capture(const Json& input, const fs::path& assets, bool verify_br
     auto raw = configuration_options(input); result["rawOptions"] = raw; result["unknownFields"] = unknown_options(raw);
     auto normalized = validate_options(raw, assets, verify_browser); result["ok"] = true; result["browserVerified"] = verify_browser;
     result["plan"] = normalized; result["capabilities"] = capabilities(normalized);
+    result["scenarioContract"] = normalized.at("scenarioContract");
     result["scopes"] = {{"detail", normalized.at("detailFilter")}, {"environment", normalized.at("envFilter")}, {"viewerFilter", "display-only; never changes producer selection"}};
     result["warnings"] = Json::array(); if(normalized.at("interpretOnly")==true)result["warnings"].push_back("显式 JS 纯解释执行对照；不自动开启详细调用，也不把 WebAssembly 设为 jitless。");
     if (normalized.at("opcode") == true || normalized.at("jsCallDetail") == true || normalized.at("nativeDetail") == true || env_selected(normalized) || normalized.at("vmpProbe") == true) result["warnings"].push_back("逐次原生插装或环境探针存在执行/序列化开销；生产端范围与预算见 plan，不等于零影响。");
     if (!result["unknownFields"].empty()) result["warnings"].push_back("未知字段完整保留，但当前内核不执行这些字段；请逐项核对，勿当成已经启用的能力。");
-  } catch (const std::exception& error) { result["ok"] = false; result["error"] = error.what(); }
+  } catch (const std::exception& error) {
+    result["ok"] = false; result["error"] = error.what();
+    result["failureStage"] = "preflight-validation";
+    try { result["scenarioContract"] = scenario_contract(field(input, "options", input), assets); }
+    catch (const std::exception& contract_error) { result["scenarioContractError"] = contract_error.what(); }
+    result["diagnostics"] = {{"protocol", "v8trace/preflight-diagnostics/1"}, {"source", "configuration validation; no page execution"}, {"error", error.what()}, {"launchesBrowser", false}, {"suggestionsAutomaticallyApplied", false}};
+  }
   return result;
 }
 }

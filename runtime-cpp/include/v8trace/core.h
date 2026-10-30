@@ -33,6 +33,7 @@ void write_file(const fs::path& file, std::string_view data, bool exclusive = fa
 void write_json(const fs::path& file, const Json& value);
 std::string sha256(std::string_view bytes);
 std::string file_sha256(const fs::path& file);
+std::string reader_sha256(const std::function<size_t(char*, size_t)>& reader);
 std::string base64(std::string_view bytes);
 std::string unbase64(std::string_view encoded);
 std::string utf16le(std::string_view wtf8);
@@ -105,6 +106,7 @@ class Store {
  private:
   uint64_t maximum_bytes_, maximum_events_;
   uint64_t gap_records_ = 0, diagnostic_bytes_ = 0;
+  Json diagnostic_options_;
   std::set<std::string> categories_, blobs_;
   struct Journal;
   std::unique_ptr<ChunkSpool> stream_;

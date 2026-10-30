@@ -7,6 +7,7 @@
 #include "v8trace/mcp.h"
 #include "v8trace/causality.h"
 #include "v8trace/causal_queries.h"
+#include "v8trace/share.h"
 #include <csignal>
 #include <fstream>
 #include <iostream>
@@ -53,7 +54,7 @@ int worker(const fs::path& assets) {
   std::unique_ptr<EvidenceViewer> causal_viewer;
   auto join = [&] { if (task.joinable()) task.join(); };
   auto templates = load_json(assets / "case_prompt_templates.json", 1048576).at("templates"); Json choices = Json::array(); for (auto& item : templates) if (edition_prompt_available(str(item,"id"))) choices.push_back({{"id", item.at("id")}, {"label", item.at("label")}, {"description", item.at("description")}});
-  send_identity({{"type", "ready"}, {"protocol", 1}, {"runtime", "cpp"}, {"runtimeVersion", V8TRACE_VERSION}, {"backend", "dual-mode"}, {"transports", Json::array({"native", "cdp"})}, {"presets", presets(assets)}, {"casePromptTemplates", choices}, {"detailFilterKinds", native_kinds()}, {"studioProtocol", "v8trace/studio/1"}, {"supportedOptions", supported_options()}, {"recordingControl", {{"protocol", "v8trace/recording/1"}, {"transports", Json::array({"native", "cdp"})}}}, {"tcp", {{"protocol", "v8trace/tcp/1"}, {"compression", "zstd"}, {"resume", true}, {"phase", "host-sealed-chunks-and-finalized-capture"}}}});
+  send_identity({{"type", "ready"}, {"protocol", 1}, {"runtime", "cpp"}, {"runtimeVersion", V8TRACE_VERSION}, {"backend", "dual-mode"}, {"transports", Json::array({"native", "cdp"})}, {"presets", presets(assets)}, {"casePromptTemplates", choices}, {"detailFilterKinds", native_kinds()}, {"studioProtocol", "v8trace/studio/1"}, {"sharingCopyProtocol", "v8trace/sharing-copy/1"}, {"supportedOptions", supported_options()}, {"recordingControl", {{"protocol", "v8trace/recording/1"}, {"transports", Json::array({"native", "cdp"})}}}, {"tcp", {{"protocol", "v8trace/tcp/1"}, {"compression", "zstd"}, {"resume", true}, {"phase", "host-sealed-chunks-and-finalized-capture"}}}});
   std::string line;
   while (std::getline(std::cin, line)) {
     Json id; std::string command;
@@ -67,7 +68,7 @@ int worker(const fs::path& assets) {
       if (command == "config-preview") { auto result=configuration_preview(field(message,"current",Json::object()),field(message,"incoming",Json::object()),str(message,"mode","replace")); result["structuralPreflight"]=preflight_capture(result.at("document"),assets,false);result.update({{"type","config-preview"},{"id",id}});send(result); }
       else if (command == "viewer-close") { viewer.reset();send({{"type","viewer-closed"},{"id",id}}); }
       else if (command == "causality-close") { causal.reset();causal_viewer.reset();send({{"type","causality-closed"},{"id",id}}); }
-      else if (command == "preflight" || command == "events" || command.starts_with("viewer-") || command.starts_with("causality-")) {
+      else if (command == "preflight" || command == "events" || command == "share-preview" || command == "share-copy" || command.starts_with("viewer-") || command.starts_with("causality-")) {
         auto request=message;cancel=false;active=true;
         task=std::thread([&,request,id,command]{
           try {
@@ -89,6 +90,11 @@ int worker(const fs::path& assets) {
                 else if(command=="causality-function-read") {if(!causal_viewer)throw std::runtime_error("Query request functions first");result=causal_viewer->read(options);}
                 else throw std::runtime_error("Unknown causal graph command");
               }
+            }
+            else if(command=="share-preview" || command=="share-copy") {
+              auto observer=[&](const Json& item){auto progress=item;progress.update({{"type","share-progress"},{"id",id}});send(progress);};
+              auto source=path(str(request,"source"));auto settings=field(request,"settings",Json::object());
+              result=command=="share-preview"?preview_share_copy(source,settings,observer,&cancel):create_share_copy(source,path(str(request,"output")),settings,str(request,"previewBinding"),observer,&cancel);
             }
             else if(command=="preflight")result=preflight_capture(field(request,"options",Json::object()),assets);
             else if(command=="events"){
@@ -156,6 +162,7 @@ int runtime_main(int argc, char** argv) {
     import_trace(trace, store, o); if (o.at("correlations") == true) correlate(store); auto summary = store.finalize({{"backend", "chromium-native"}, {"transport", "native"}, {"runtime", "cpp"}, {"captureConclusion", "imported"}, {"sourceTraceSha256", file_sha256(raw)}, {"selectedCategories", o.at("categories")}}); send(summary); return 0;
   }
   if (command == "inspect") { send(inspect_capture(path(str(flags, "capture")))); return 0; }
+  if (command == "share-preview" || command == "share-copy") { auto settings=load_json(path(str(flags,"settings")),65536);auto source=path(str(flags,"source"));send(command=="share-preview"?preview_share_copy(source,settings,{},&interrupted):create_share_copy(source,path(str(flags,"output")),settings,str(flags,"binding"),{},&interrupted));return 0; }
   if (command == "stream-pack") { send(stream_pack(path(str(flags, "capture")), path(str(flags, "spool")))); return 0; }
   if (command == "vmp-spec") { auto spec=vmp_spec_template(path(str(flags,"source")),str(flags,"url")); write_file(path(str(flags,"output")),dump(spec,2)+"\n",true);send({{"protocol","v8trace/vmp-spec/1"},{"confirmed",false},{"output",str(flags,"output")},{"requiresExplicitConfirmation",true}});return 0; }
   if (command == "stream-unpack") { send(stream_unpack(path(str(flags, "spool")), path(str(flags, "output")), str(flags, "stream-id"))); return 0; }

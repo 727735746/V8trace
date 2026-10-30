@@ -3,12 +3,15 @@ param(
     [string]$OutputPath,
     [string]$BuildRoot,
     [string]$NativeChromePath,
+    [string]$PackageBatchId,
+    [string]$WorkspacePlan,
     [ValidateSet('community','professional')][string]$Edition,
-    [ValidateRange(1, 32)][int]$Jobs = 4
+    [ValidateRange(1, 4)][int]$Jobs = 1
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'editions\runtime-identity.ps1')
+. (Join-Path $PSScriptRoot 'editions\artifact-tools.ps1')
 if (-not $Edition) { $Edition = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'professional\runtime\sources.cmake')) { 'professional' } else { 'community' } }
 $Edition = $Edition.ToLowerInvariant()
 if (-not $OutputPath) { $OutputPath = Join-Path $PSScriptRoot ('dist\V8Trace-' + $Edition) }
@@ -18,12 +21,50 @@ $build = [System.IO.Path]::GetFullPath($BuildRoot)
 if (Test-Path -LiteralPath $output) { throw "输出目录已存在，请选择新目录：$output" }
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path -LiteralPath $compiler)) { throw 'Windows UI 需要 .NET Framework C# 编译器；采集内核为独立 C++ 程序。' }
+$compilerShaBefore=(Get-FileHash -LiteralPath $compiler).Hash.ToLowerInvariant()
+$bindingPath=$output+'.binding.json'
+if(Test-Path -LiteralPath $bindingPath){throw 'Choose a fresh package and binding path.'}
+if(-not $PackageBatchId){$PackageBatchId=$Edition+'-'+[DateTime]::UtcNow.ToString('yyyyMMddTHHmmss')+'-'+[guid]::NewGuid().ToString('N')}
+if($WorkspacePlan){Invoke-V8TraceBuildTool -Tool workspace_plan -Arguments @('check-consumer','--plan',$WorkspacePlan,'--root',$build,'--source',$PSScriptRoot,'--edition',$Edition)}
+else {Invoke-V8TraceBuildTool -Tool workspace_plan -Arguments @('init-host','--root',$build,'--source',$PSScriptRoot,'--edition',$Edition,'--jobs',[string]$Jobs)}
+$lease=Open-V8TraceHostLease -Root $build
+try {
+$attempt=Join-Path $build ('package-binding-'+[guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $attempt | Out-Null
+$inputs=Join-Path $attempt 'source-inputs.json'
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('snapshot','--source',$PSScriptRoot,'--edition',$Edition,'--output',$inputs)
+$nativeInputs=$null;$requiredPackageBytes=[int64]134217728
+if($NativeChromePath){
+    $nativeInputs=Join-Path $attempt 'native-inputs.json'
+    $nativeSourceRoot=Split-Path -Parent ([IO.Path]::GetFullPath($NativeChromePath))
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('native-inputs','--source',$nativeSourceRoot,'--edition',$Edition,'--output',$nativeInputs)
+    $nativeObserved=Get-Content -LiteralPath $nativeInputs -Raw -Encoding UTF8 | ConvertFrom-Json
+    foreach($row in $nativeObserved.files){
+        $requiredPackageBytes+=[int64]$row.bytes
+        $targetPath=[IO.Path]::GetFullPath((Join-Path (Join-Path $output 'chromium') $row.path))
+        if($targetPath.Length -ge 260 -or (Split-Path -Parent $targetPath).Length -ge 248){throw 'Native runtime paths exceed the verified legacy file path budget; select a shorter independent package root.'}
+    }
+}
+Invoke-V8TraceBuildTool -Tool workspace_plan -Arguments @('check-output','--root',$output,'--source',$PSScriptRoot,'--required-bytes',[string]$requiredPackageBytes)
+$priorDependencies=$null
+if(Test-Path -LiteralPath (Join-Path $build 'CMakeCache.txt')){
+    $priorDependencies=Join-Path $attempt 'dependencies-before-configure.json'
+    Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('dependencies','--build',$build,'--output',$priorDependencies)
+}
 & cmake -S (Join-Path $PSScriptRoot 'runtime-cpp') -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release ('-DV8TRACE_EDITION=' + $Edition)
 if ($LASTEXITCODE -ne 0) { throw "CMake 配置失败：$LASTEXITCODE" }
+if($priorDependencies){Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-dependencies','--dependencies',$priorDependencies)}
+$dependencies=Join-Path $attempt 'dependency-inputs.json'
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('dependencies','--build',$build,'--output',$dependencies)
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-source','--snapshot',$inputs,'--scope','runtime')
 & cmake --build $build --parallel $Jobs
 if ($LASTEXITCODE -ne 0) { throw "C++ 编译失败：$LASTEXITCODE" }
-& ctest --test-dir $build --output-on-failure
+$testReport=Join-Path $attempt 'ctest.xml'
+& ctest --test-dir $build --output-on-failure --output-junit $testReport
 if ($LASTEXITCODE -ne 0) { throw "C++ 测试失败：$LASTEXITCODE" }
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-source','--snapshot',$inputs)
+$runtimeAccepted=Join-Path $attempt 'runtime-acceptance.json'
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('runtime-receipt','--snapshot',$inputs,'--dependencies',$dependencies,'--runtime',(Join-Path $build 'v8trace-runtime.exe'),'--junit',$testReport,'--output',$runtimeAccepted)
 $runtime = Join-Path $output 'runtime'
 $assets = Join-Path $output 'app\v8-trace'
 New-Item -ItemType Directory -Path $runtime,$assets -Force | Out-Null
@@ -36,7 +77,8 @@ $encoding = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText((Join-Path $runtime 'runtime.json'), '{"engine":"cpp","automaticFallback":false}', $encoding)
 [System.IO.File]::WriteAllText((Join-Path $runtime 'edition.json'), ($identity.edition | ConvertTo-Json -Depth 6), $encoding)
 $arguments = @('/nologo','/target:winexe','/platform:x64','/optimize+','/codepage:65001',('/out:' + (Join-Path $output 'V8Trace.exe')),('/win32manifest:' + (Join-Path $PSScriptRoot 'ui\V8Trace.exe.manifest')),'/reference:System.dll','/reference:System.Core.dll','/reference:System.Drawing.dll','/reference:System.Windows.Forms.dll','/reference:System.Web.Extensions.dll')
-foreach ($name in @('TraceWindow.cs','TraceWindow.Studio.cs','TraceWindow.Causality.cs','TraceWindow.Edition.cs','TraceWindow.Mcp.cs','McpService.cs','WorkerClient.cs','AssemblyInfo.cs')) { $arguments += Join-Path $PSScriptRoot ('ui\' + $name) }
+$arguments += '/win32icon:' + (Join-Path $PSScriptRoot 'ui\assets\alcohol-v8trace.ico')
+foreach ($name in @('TraceWindow.cs','TraceWindow.Studio.cs','TraceWindow.Causality.cs','TraceWindow.Edition.cs','TraceWindow.Mcp.cs','TraceWindow.Cyber.cs','TraceWindow.Logs.cs','LogStorage.cs','ThemePreferences.cs','McpService.cs','WorkerClient.cs','AssemblyInfo.cs')) { $arguments += Join-Path $PSScriptRoot ('ui\' + $name) }
 & $compiler @arguments
 if ($LASTEXITCODE -ne 0) { throw "UI 编译失败：$LASTEXITCODE" }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'ui\V8Trace.exe.config') -Destination $output
@@ -46,14 +88,15 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-cpp\JSVMP与缓冲说�
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-cpp\大日志索引说明.md') -Destination (Join-Path $output '大日志索引说明.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-cpp\原生环境取证说明.md') -Destination (Join-Path $output '原生环境取证说明.md')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-cpp\闭包快照说明.md') -Destination (Join-Path $output '闭包快照说明.md')
-foreach ($name in @('网络状态专项说明.md','持续分块说明.md','VM探针与WASM模块说明.md','配置与证据索引说明.md','HTTP首栈与参数DOM插桩说明.md','后台HTTP与常驻Job完整性说明.md')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('runtime-cpp\'+$name)) -Destination (Join-Path $output $name) }
+foreach ($name in @('网络状态专项说明.md','持续分块说明.md','VM探针与WASM模块说明.md','配置与证据索引说明.md','HTTP首栈与参数DOM插桩说明.md','后台HTTP与常驻Job完整性说明.md','分享副本说明.md')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('runtime-cpp\'+$name)) -Destination (Join-Path $output $name) }
 foreach ($name in @('MCP搜索分析说明.md','trace-search来源与适配.md','mcp-client.example.json')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('runtime-cpp\'+$name)) -Destination (Join-Path $output $name) }
-foreach ($name in @('README-cheatsheet.md','操作手册.md','编译指令.txt')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $output $name) }
+foreach ($name in @('README-cheatsheet.md','操作手册.md','编译指令.txt','UI主题与日志管理说明.md')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination (Join-Path $output $name) }
 $licenses = Join-Path $output 'licenses'
 New-Item -ItemType Directory -Path $licenses -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'editions\community\LICENSE') -Destination (Join-Path $licenses 'v8trace-community-Apache-2.0.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'editions\community\NOTICE') -Destination (Join-Path $licenses 'v8trace-community-NOTICE.txt')
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'editions\版本拆分说明.md') -Destination (Join-Path $output '版本拆分说明.md')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'editions\产物绑定与工作区说明.md') -Destination (Join-Path $output '产物绑定与工作区说明.md')
 if ($Edition -eq 'community') {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'editions\community\LICENSE') -Destination (Join-Path $output 'LICENSE')
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'editions\community\NOTICE') -Destination (Join-Path $output 'NOTICE')
@@ -104,15 +147,26 @@ if ($NativeChromePath) {
             New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
             Copy-Item -LiteralPath (Join-Path $browserRoot $relative) -Destination $target
         }
-    } else {
-        if ((Test-Path -LiteralPath (Join-Path $browserRoot 'build.ninja')) -or (Test-Path -LiteralPath (Join-Path $browserRoot 'obj'))) { throw '编译目录缺少运行文件清单，请先执行 Chromium Package；不会把 obj / 编译缓存复制到发行包。' }
-        Copy-Item -LiteralPath $browserRoot -Destination $destination -Recurse
-    }
+    } else { throw 'Native browser packaging requires its exact runtime inventory.' }
+    $copiedInventory=Join-Path $destination 'v8trace-runtime-files.json'
+    if(-not(Test-Path -LiteralPath $copiedInventory)){Copy-Item -LiteralPath $inventoryFile -Destination $copiedInventory}
     & icacls.exe $destination /grant '*S-1-15-2-2:(OI)(CI)(RX)'
     if ($LASTEXITCODE -ne 0) { throw 'Chromium LPAC 权限初始化失败' }
 }
 $files = @(Get-ChildItem -LiteralPath $output -File -Recurse | ForEach-Object { [ordered]@{ path=$_.FullName.Substring($output.TrimEnd('\').Length + 1); bytes=$_.Length; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } })
 $manifest = [ordered]@{ schemaVersion=1; product='V8 Trace Studio'; author='Alcohol'; runtime='cpp'; runtimeVersion='2.0.0'; target='Windows x64'; frontend='WinForms'; nodeRequired=$false; automaticRuntimeFallback=$false; builtAt=[DateTimeOffset]::UtcNow.ToString('o'); codeSigned=$false; files=$files }
+$inputDocument=Get-Content -LiteralPath $inputs -Raw -Encoding UTF8 | ConvertFrom-Json
+$manifest.packageBatchId=$PackageBatchId
+$manifest.uiVersion=(Get-Item -LiteralPath (Join-Path $output 'V8Trace.exe')).VersionInfo.FileVersion
+$manifest.uiCompilerSha256=$compilerShaBefore
+if((Get-FileHash -LiteralPath $compiler).Hash.ToLowerInvariant() -ne $compilerShaBefore){throw 'UI compiler changed during this package attempt.'}
+$manifest.sourceInputsSha256=(Get-FileHash -LiteralPath $inputs).Hash.ToLowerInvariant()
+$manifest.sourceDigest=$inputDocument.sourceDigest
+$manifest.uiInputDigest=$inputDocument.uiInputDigest
+$manifest.runtimeInputDigest=$inputDocument.runtimeInputDigest
+$manifest.runtimeAcceptanceSha256=(Get-FileHash -LiteralPath $runtimeAccepted).Hash.ToLowerInvariant()
+$manifest.artifactBindingProtocol='v8trace/product-binding/1'
+$manifest.artifactBindingFileName=[IO.Path]::GetFileName($bindingPath)
 $manifest.browserIncluded=[bool]$NativeChromePath
 $manifest.edition=$Edition
 $manifest.editionProtocol='v8trace/edition/1'
@@ -123,4 +177,11 @@ $manifest.jsvmpDiscovery=if($Edition -eq 'professional'){'offline-indexed-read-c
 $manifest.mcp=[ordered]@{runtime='cpp';tools=16;transports=@('stdio','streamable-http');protocolVersions=@('2026-07-28','2025-11-25');defaultBind='127.0.0.1';defaultPort=17881;globalConfigurationModified=$false;referenceCommit='fd8f5c781c69b10fad463d094b727c79c0d24364'}
 $manifest.mcp.tools=if($Edition -eq 'professional'){16}else{11}
 [System.IO.File]::WriteAllText((Join-Path $output 'package-manifest.json'),($manifest | ConvertTo-Json -Depth 8),$encoding)
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check-source','--snapshot',$inputs)
+$sealArgs=@('seal','--package',$output,'--snapshot',$inputs,'--runtime-acceptance',$runtimeAccepted,'--batch',$PackageBatchId,'--compiler',$compiler,'--output',$bindingPath)
+if($nativeInputs){$sealArgs+=@('--native-inputs',$nativeInputs)}
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments $sealArgs
+Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('check','--binding',$bindingPath,'--source',$PSScriptRoot)
 [pscustomobject]@{output=$output;runtime=(Join-Path $runtime 'v8trace-runtime.exe');nodeRequired=$false;files=$files.Count} | ConvertTo-Json
+
+} finally { $lease.Dispose() }

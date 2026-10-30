@@ -2,6 +2,7 @@
 #include "v8trace/edition.h"
 #include "v8trace/journal.h"
 #include "v8trace/stream.h"
+#include "v8trace/scenario_contract.h"
 
 namespace v8trace {
 struct Store::Journal {
@@ -26,6 +27,9 @@ Store::Store(const fs::path& output, const Json& options, Sink observer) : root(
   maximum_bytes_(options.value("maxBytes", 268435456ULL)), maximum_events_(options.value("maxEvents", 100000ULL)), observer_(std::move(observer)) {
   if (!fs::create_directory(root)) { if (fs::exists(root)) throw std::runtime_error("Capture output already exists: " + utf8(root)); throw std::runtime_error("Create capture directory failed"); }
   root = fs::canonical(root);
+  diagnostic_options_ = Json::object();
+  for (auto key : {"http", "redirectBodies", "maxBodyBytes", "maxBytes", "maxEvents"})
+    if (options.contains(key)) diagnostic_options_[key] = options.at(key);
   for (const auto& name : field(options, "categories", Json::array())) categories_.insert(text(name));
   if (field(options, "chunkSpool", false) == true) { auto directory = path(str(options, "streamSpoolPath", utf8(root) + ".stream")); if (inside(root, fs::absolute(directory)) || inside(fs::absolute(directory), root)) throw std::runtime_error("Chunk spool must stay outside capture"); stream_ = std::make_unique<ChunkSpool>(directory, capture_id, options); }
   journal_ = std::make_unique<Journal>(root, options.value("writeBufferBytes", 8388608ULL), options.value("writeBatchBytes", 1048576ULL), stream_.get());
@@ -64,6 +68,7 @@ Json Store::blob_file(const fs::path& file, std::string_view representation) { i
 void Store::json(std::string_view relative, const Json& value) { write_json(filename(relative), value); }
 void Store::gap(std::string_view reason, Json details, bool critical) {
   Json record{{"gapSeq", gap_records_ + 1}, {"reason", reason}, {"critical", critical}, {"details", std::move(details)}, {"observedAt", now()}};
+  record["diagnostic"] = gap_diagnostic(record, diagnostic_options_);
   auto data = dump(record) + "\n";
   auto length = data.size();
   journal_->writer.append("gaps.jsonl", std::move(data));
@@ -79,6 +84,8 @@ Json Store::finalize(Json record) {
   accepting = false; journal_->writer.finish(); journal_->handles.clear(); auto stats = journal_->writer.stats();
   Json writer{{"protocol", "v8trace/journal-writer/1"}, {"boundary", "host-after-value-serialization"}, {"policy", "bounded-blocking-no-drop"}, {"capacityBytes", stats.capacity_bytes}, {"batchBytes", stats.batch_bytes}, {"maximumPendingRows", stats.maximum_pending_rows}, {"enqueuedRows", stats.enqueued_rows}, {"writtenRows", stats.written_rows}, {"enqueuedBytes", stats.enqueued_bytes}, {"writtenBytes", stats.written_bytes}, {"writeBatches", stats.write_batches}, {"flushes", stats.flushes}, {"backpressureWaits", stats.backpressure_waits}, {"oversizedRows", stats.oversized_rows}, {"highWaterBytes", stats.high_water_bytes}, {"highWaterRows", stats.high_water_rows}, {"pendingBytes", stats.pending_bytes}, {"drained", stats.enqueued_rows == stats.written_rows && stats.pending_bytes == 0}, {"durability", "stream-flush-not-power-loss-fsync"}};
   Json gap_journal{{"protocol", "v8trace/gaps/1"}, {"path", "gaps.jsonl"}, {"records", gap_records_}, {"bytes", diagnostic_bytes_}, {"sha256", file_sha256(filename("gaps.jsonl"))}, {"summaryLimit", 200}, {"summaryByteBudget", 4194304}, {"summaryBytes", journal_->gap_summary_bytes}, {"outsideCaptureBudget", true}, {"drained", writer.at("drained")}};
-  Json summary{{"schemaVersion", 1}, {"captureId", capture_id}}; summary.update(record); summary.update({{"counts", counts}, {"eventCount", sequence}, {"recordedBytes", bytes}, {"diagnosticBytes", diagnostic_bytes_}, {"blobCount", blobs_.size()}, {"integrityConclusion", critical_gaps ? "partial" : "complete"}, {"criticalGapCount", critical_gaps}, {"totalGapCount", gap_records_}, {"omittedGapCount", omitted_gaps}, {"gaps", gaps}, {"gapJournal", gap_journal}, {"journalWriter", writer}}); if (stream_) summary["chunkStream"] = {{"protocol", "v8trace/chunk-stream/1"}, {"spool", stream_->status().at("spool")}, {"statusFile", "spool.json"}, {"receipt", "chunk-stream-transfer.json"}, {"captureIntegrityIndependentOfNetwork", true}}; json("gaps.json", gaps); json("summary.json", summary); if (stream_) { try { json("chunk-stream-transfer.json", stream_->seal(root)); } catch (const std::exception& error) { json("chunk-stream-transfer.json", {{"protocol", "v8trace/chunk-stream/1"}, {"localCommitted", false}, {"remoteCommitted", false}, {"error", error.what()}, {"sourceRetained", true}}); } } return summary;
+  Json summary{{"schemaVersion", 1}, {"captureId", capture_id}}; summary.update(record); summary.update({{"counts", counts}, {"eventCount", sequence}, {"recordedBytes", bytes}, {"diagnosticBytes", diagnostic_bytes_}, {"blobCount", blobs_.size()}, {"integrityConclusion", critical_gaps ? "partial" : "complete"}, {"criticalGapCount", critical_gaps}, {"totalGapCount", gap_records_}, {"omittedGapCount", omitted_gaps}, {"gaps", gaps}, {"gapJournal", gap_journal}, {"journalWriter", writer}});
+  summary["diagnostics"] = capture_diagnostics(summary, diagnostic_options_);
+  if (stream_) summary["chunkStream"] = {{"protocol", "v8trace/chunk-stream/1"}, {"spool", stream_->status().at("spool")}, {"statusFile", "spool.json"}, {"receipt", "chunk-stream-transfer.json"}, {"captureIntegrityIndependentOfNetwork", true}}; json("gaps.json", gaps); json("summary.json", summary); if (stream_) { try { json("chunk-stream-transfer.json", stream_->seal(root)); } catch (const std::exception& error) { json("chunk-stream-transfer.json", {{"protocol", "v8trace/chunk-stream/1"}, {"localCommitted", false}, {"remoteCommitted", false}, {"error", error.what()}, {"sourceRetained", true}}); } } return summary;
 }
 }

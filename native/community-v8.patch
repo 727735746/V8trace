@@ -1,0 +1,3778 @@
+--- /dev/null
++++ b/include/v8-trace-identity.h
+@@ -0,0 +1,18 @@
++#ifndef V8_INCLUDE_V8_TRACE_IDENTITY_H_
++#define V8_INCLUDE_V8_TRACE_IDENTITY_H_
++#include <cstdint>
++#include <string>
++#include "v8-forward.h"
++#include "v8-local-handle.h"
++#include "v8config.h"
++namespace v8 {
++class Isolate;
++struct V8TraceIdentitySnapshot {
++  uint64_t isolate_id = 0, realm_id = 0, js_call_id = 0, native_call_id = 0, producer_id = 0, epoch = 0;
++  uint64_t js_event_sequence = 0, native_event_sequence = 0, opcode_event_sequence = 0, wasm_event_sequence = 0;
++};
++V8_EXPORT V8TraceIdentitySnapshot V8TraceIdentity(Isolate* isolate);
++V8_EXPORT std::string V8TraceValueJSON(Isolate*, Local<Value>);
++V8_EXPORT std::string V8TraceCallStackJSON(Isolate*);
++}
++#endif
+--- a/src/api/api-arguments-inl.h
++++ b/src/api/api-arguments-inl.h
+@@ -359,6 +359,7 @@
+   DirectHandle<InterceptorInfo> has_side_effects;
+   PREPARE_CALLBACK_INFO_INTERCEPTOR(isolate, f, void, has_side_effects,
+                                     ExceptionContext::kNamedSetter);
++  v8trace::NativeExtra(isolate, call_scope.v8trace_call_id(), "value", *value);
+   v8::Intercepted intercepted =
+       f(v8::Utils::ToLocal(name), v8::Utils::ToLocal(value), callback_info);
+   return intercepted;
+@@ -379,6 +380,7 @@
+   DirectHandle<InterceptorInfo> has_side_effects;
+   PREPARE_CALLBACK_INFO_INTERCEPTOR(isolate, f, void, has_side_effects,
+                                     ExceptionContext::kNamedDefiner);
++  v8trace::NativeDescriptor(isolate, call_scope.v8trace_call_id(), desc);
+   v8::Intercepted intercepted =
+       f(v8::Utils::ToLocal(name), desc, callback_info);
+   return intercepted;
+@@ -488,6 +490,7 @@
+   DirectHandle<InterceptorInfo> has_side_effects;
+   PREPARE_CALLBACK_INFO_INTERCEPTOR(isolate, f, void, has_side_effects,
+                                     ExceptionContext::kIndexedSetter);
++  v8trace::NativeExtra(isolate, call_scope.v8trace_call_id(), "value", *value);
+   v8::Intercepted intercepted =
+       f(index, v8::Utils::ToLocal(value), callback_info);
+   return intercepted;
+@@ -508,6 +511,7 @@
+   DirectHandle<InterceptorInfo> has_side_effects;
+   PREPARE_CALLBACK_INFO_INTERCEPTOR(isolate, f, void, has_side_effects,
+                                     ExceptionContext::kIndexedDefiner);
++  v8trace::NativeDescriptor(isolate, call_scope.v8trace_call_id(), desc);
+   v8::Intercepted intercepted = f(index, desc, callback_info);
+   return intercepted;
+ }
+@@ -630,6 +634,7 @@
+   PREPARE_CALLBACK_INFO_ACCESSOR(isolate, f, v8::Boolean, accessor_info,
+                                  holder(), ACCESSOR_SETTER,
+                                  ExceptionContext::kAttributeSet);
++  v8trace::NativeExtra(isolate, call_scope.v8trace_call_id(), "value", *value);
+   f(v8::Utils::ToLocal(name), v8::Utils::ToLocal(value), callback_info);
+   // Historically, in case of v8::AccessorNameSetterCallback it wasn't allowed
+   // to set the result and not setting the result was treated as successful
+--- a/src/api/api.cc
++++ b/src/api/api.cc
+@@ -12341,6 +12341,7 @@
+   }
+   ExternalCallbackScope call_scope(i_isolate, FUNCTION_ADDR(setter),
+                                    v8::ExceptionContext::kNamedSetter, &info);
++  v8trace::NativeExtra(i_isolate, call_scope.v8trace_call_id(), "value", *Utils::OpenDirectHandle(*value));
+   v8::Intercepted intercepted = setter(property, value, info);
+   return intercepted;
+ }
+--- a/src/baseline/baseline-compiler.cc
++++ b/src/baseline/baseline-compiler.cc
+@@ -651,10 +651,12 @@
+   if (!v8_flags.sparkplug_dumping) return;
+ #endif  // V8_DUMPLING
+   SaveAccumulatorScope accumulator_scope(this, &basm_);
+-  CallRuntime(function_id, bytecode_,
+-              Smi::FromInt(BytecodeArray::kHeaderSize - kHeapObjectTag +
+-                           iterator().current_offset()),
+-              kInterpreterAccumulatorRegister);
++  auto offset = Smi::FromInt(BytecodeArray::kHeaderSize - kHeapObjectTag + iterator().current_offset());
++  if (function_id == Runtime::kTraceUnoptimizedBytecodeEntry ||
++      function_id == Runtime::kTraceUnoptimizedBytecodeExit)
++    CallRuntime(function_id, bytecode_, offset, kInterpreterAccumulatorRegister, offset);
++  else
++    CallRuntime(function_id, bytecode_, offset, kInterpreterAccumulatorRegister);
+ }
+ #endif  // V8_TRACE_UNOPTIMIZED || V8_DUMPLING
+ 
+--- a/src/builtins/builtins-utils.h
++++ b/src/builtins/builtins-utils.h
+@@ -135,10 +135,11 @@
+   V8_NOINLINE static Address Builtin_Impl_Stats_##name(                    \
+       int args_length, Address* args_object, Isolate* isolate) {           \
+     BuiltinArguments args(args_length, args_object);                       \
++    v8trace::NativeArgumentsScope v8trace_scope(isolate, #name, args, true); \
+     RCS_SCOPE(isolate, RuntimeCallCounterId::kBuiltin_##name);             \
+     TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.runtime"),                  \
+                  "V8.Builtin_" #name);                                     \
+-    return BUILTIN_CONVERT_RESULT(Builtin_Impl_##name(args, isolate));     \
++    return BUILTIN_CONVERT_RESULT(v8trace_scope.Return(Builtin_Impl_##name(args, isolate)));     \
+   }                                                                        \
+                                                                            \
+   V8_WARN_UNUSED_RESULT Address Builtin_##name(                            \
+@@ -148,8 +149,9 @@
+       return Builtin_Impl_Stats_##name(args_length, args_object, isolate); \
+     }                                                                      \
+     BuiltinArguments args(args_length, args_object);                       \
++    v8trace::NativeArgumentsScope v8trace_scope(isolate, #name, args, true); \
+     CHECK_BUILTIN_SANDBOXING_MODE()                                        \
+-    return BUILTIN_CONVERT_RESULT(Builtin_Impl_##name(args, isolate));     \
++    return BUILTIN_CONVERT_RESULT(v8trace_scope.Return(Builtin_Impl_##name(args, isolate)));     \
+   }                                                                        \
+                                                                            \
+   V8_WARN_UNUSED_RESULT static Tagged<Object> Builtin_Impl_##name(         \
+@@ -163,8 +165,9 @@
+       int args_length, Address* args_object, Isolate* isolate) {           \
+     DCHECK(isolate->context().is_null() || IsContext(isolate->context())); \
+     BuiltinArguments args(args_length, args_object);                       \
++    v8trace::NativeArgumentsScope v8trace_scope(isolate, #name, args, true); \
+     CHECK_BUILTIN_SANDBOXING_MODE()                                        \
+-    return BUILTIN_CONVERT_RESULT(Builtin_Impl_##name(args, isolate));     \
++    return BUILTIN_CONVERT_RESULT(v8trace_scope.Return(Builtin_Impl_##name(args, isolate)));     \
+   }                                                                        \
+                                                                            \
+   V8_WARN_UNUSED_RESULT static Tagged<Object> Builtin_Impl_##name(         \
+--- a/src/builtins/x64/builtins-x64.cc
++++ b/src/builtins/x64/builtins-x64.cc
+@@ -1072,6 +1072,8 @@
+ //
+ // The function builds an interpreter frame. See InterpreterFrameConstants in
+ // frame-constants.h for its layout.
++#include "src/runtime/v8trace-x64.inc"
++
+ void Builtins::Generate_InterpreterEntryTrampoline(
+     MacroAssembler* masm, InterpreterEntryTrampolineMode mode) {
+   Register closure = rdi;
+@@ -1246,6 +1248,7 @@
+         masm->pc_offset());
+   }
+   __ call(kJavaScriptCallCodeStartRegister);
++  GenerateV8TraceNativeReturn(masm);
+ 
+   // Any returns to the entry trampoline are either due to the return bytecode
+   // or the interpreter tail calling a builtin and then a dispatch.
+@@ -2616,6 +2619,7 @@
+ // static
+ void Builtins::Generate_CallFunction(MacroAssembler* masm,
+                                      ConvertReceiverMode mode) {
++  GenerateV8TraceNativeEntry(masm, false);
+   // ----------- S t a t e -------------
+   //  -- rax : the number of arguments
+   //  -- rdi : the function to call (checked to be a JSFunction)
+@@ -2873,6 +2877,7 @@
+ 
+ // static
+ void Builtins::Generate_Construct(MacroAssembler* masm) {
++  GenerateV8TraceNativeEntry(masm, true);
+   // ----------- S t a t e -------------
+   //  -- rax : the number of arguments
+   //  -- rdx : the new target (either the same as the constructor or
+--- a/src/codegen/compiler.cc
++++ b/src/codegen/compiler.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/codegen/compiler.h"
++#include "src/runtime/v8trace-browser.h"
+ 
+ #include <memory>
+ #include <optional>
+@@ -1537,6 +1538,7 @@
+   StressLazy(isolate, script);
+ 
+   script->set_compilation_state(Script::CompilationState::kCompiled);
++  v8trace::BrowserScript(isolate, *script);
+   DCHECK_IMPLIES(isolate->NeedsSourcePositions(), script->has_line_ends());
+ }
+ 
+@@ -3359,6 +3361,7 @@
+     LanguageMode language_mode, ParseRestriction restriction,
+     int parameters_end_pos, int eval_position,
+     ParsingWhileDebugging parsing_while_debugging) {
++  v8trace::BrowserCompileInput(isolate, *source, *isolate->factory()->empty_string(), "eval-or-function");
+   // The cache lookup key needs to be aware of the separation between the
+   // parameters and the body to prevent this valid invocation:
+   //   Function("", "function anonymous(\n/**/) {\n}");
+@@ -4008,6 +4011,8 @@
+     ScriptCompiler::CompileOptions compile_options,
+     ScriptCompiler::NoCacheReason no_cache_reason, NativesFlag natives,
+     ScriptCompiler::CompilationDetails* compilation_details) {
++  Handle<Object> v8trace_name;
++  v8trace::BrowserCompileInput(isolate, *source, script_details.name_obj.ToHandle(&v8trace_name) ? *v8trace_name : *isolate->factory()->empty_string(), "script", script_details.origin_options.IsModule());
+   ScriptCompileTimerScope compile_timer(isolate, no_cache_reason,
+                                         compilation_details);
+ 
+@@ -4161,6 +4166,8 @@
+       maybe_result.ToHandle(&result)) {
+     Cast<Script>(result->script())->set_produce_compile_hints(true);
+   }
++  if (maybe_result.ToHandle(&result) && IsScript(result->script()))
++    v8trace::BrowserScript(isolate, Cast<Script>(result->script()));
+ 
+   return maybe_result;
+ }
+--- a/src/codegen/external-reference.cc
++++ b/src/codegen/external-reference.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/codegen/external-reference.h"
++#include "src/runtime/v8trace-detail.h"
+ 
+ #include <optional>
+ 
+@@ -865,6 +866,36 @@
+   return ExternalReference(&v8_flags.log_or_trace_osr);
+ }
+ 
++FUNCTION_REFERENCE(v8trace_native_js_entry, v8trace::NativeJsEntry)
++
++ExternalReference ExternalReference::address_of_v8trace_opcode_flag() {
++  return ExternalReference(&v8_flags.trace_opcode);
++}
++
++ExternalReference ExternalReference::address_of_v8trace_jscall_flag() {
++  return ExternalReference(&v8_flags.trace_jscall_detail);
++}
++
++ExternalReference ExternalReference::address_of_v8trace_ignition_flag() {
++  return ExternalReference(&v8_flags.trace_ignition);
++}
++
++ExternalReference ExternalReference::address_of_v8trace_baseline_flag() {
++  return ExternalReference(&v8_flags.trace_baseline_exec);
++}
++
++ExternalReference ExternalReference::address_of_v8trace_vmp_flag() {
++  return ExternalReference(&v8_flags.trace_vmp);
++}
++
++ExternalReference ExternalReference::address_of_v8trace_env_flag() {
++  return ExternalReference(&v8_flags.trace_env);
++}
++
++ExternalReference ExternalReference::address_of_v8trace_native_flag() {
++  return ExternalReference(&v8_flags.trace_native_detail);
++}
++
+ ExternalReference ExternalReference::address_of_builtin_subclassing_flag() {
+   return ExternalReference(&v8_flags.builtin_subclassing);
+ }
+--- a/src/codegen/external-reference.h
++++ b/src/codegen/external-reference.h
+@@ -97,6 +97,14 @@
+ #endif  // V8_ENABLE_REGEXP_DIAGNOSTICS
+ 
+ #define EXTERNAL_REFERENCE_LIST(V)                                             \
++  V(address_of_v8trace_opcode_flag, "v8trace opcode flag") \
++  V(address_of_v8trace_jscall_flag, "v8trace jscall flag") \
++  V(address_of_v8trace_ignition_flag, "v8trace ignition flag") \
++  V(address_of_v8trace_baseline_flag, "v8trace baseline flag") \
++  V(address_of_v8trace_vmp_flag, "v8trace vmp flag") \
++  V(address_of_v8trace_env_flag, "v8trace env flag") \
++  V(address_of_v8trace_native_flag, "v8trace native flag") \
++  V(v8trace_native_js_entry, "v8trace native JS entry") \
+   V(abort_with_reason, "abort_with_reason")                                    \
+   V(abort_with_sandbox_violation, "abort_with_sandbox_violation")              \
+   V(address_of_log_or_trace_osr, "v8_flags.log_or_trace_osr")                  \
+--- a/src/codegen/x64/macro-assembler-x64.cc
++++ b/src/codegen/x64/macro-assembler-x64.cc
+@@ -4975,6 +4975,9 @@
+   Label profiler_or_side_effects_check_enabled, done_api_call,
+       done_reading_result;
+   if (with_profiling) {
++    __ Move(scratch, ER::address_of_v8trace_native_flag());
++    __ cmpb(Operand(scratch, 0), Immediate(0));
++    __ j(not_zero, &profiler_or_side_effects_check_enabled);
+     __ RecordComment("Check if profiler or side effects check is enabled");
+     __ cmpb(__ ExternalReferenceAsOperand(IsolateFieldId::kExecutionMode),
+             Immediate(0));
+--- a/src/d8/d8.cc
++++ b/src/d8/d8.cc
+@@ -7756,6 +7756,7 @@
+     // to.
+     perfetto::TracingInitArgs init_args;
+     init_args.backends = perfetto::BackendType::kInProcessBackend;
++    init_args.shmem_size_hint_kb = 8192;
+     perfetto::Tracing::Initialize(init_args);
+ 
+     tracing->InitializeForPerfetto(&trace_file);
+--- a/src/execution/arguments.h
++++ b/src/execution/arguments.h
+@@ -10,6 +10,7 @@
+ #include "src/handles/handles.h"
+ #include "src/logging/runtime-call-stats-scope.h"
+ #include "src/objects/objects.h"
++#include "src/runtime/v8trace-detail.h"
+ #include "src/objects/slots.h"
+ #include "src/sandbox/check.h"
+ #include "src/tracing/trace-event.h"
+@@ -121,7 +122,8 @@
+     RCS_SCOPE(isolate, RuntimeCallCounterId::k##Name);                         \
+     TRACE_EVENT(TRACE_DISABLED_BY_DEFAULT("v8.runtime"), "V8.Runtime_" #Name); \
+     RuntimeArguments args(args_length, args_object);                           \
+-    return Convert(__RT_impl_##Name(args, isolate));                           \
++    v8trace::NativeArgumentsScope v8trace_scope(isolate, #Name, args); \
++    return Convert(v8trace_scope.Return(__RT_impl_##Name(args, isolate)));                           \
+   }
+ 
+ #define TEST_AND_CALL_RCS(Name)                                \
+@@ -169,12 +171,13 @@
+     CLOBBER_DOUBLE_REGISTERS();                                            \
+     TEST_AND_CALL_RCS(Name)                                                \
+     RuntimeArguments args(args_length, args_object);                       \
++    v8trace::NativeArgumentsScope v8trace_scope(isolate, #Name, args); \
+     if constexpr (detail::RuntimeFunctionFullNameCanTriggerGC(             \
+                       detail::RuntimeFunctionFullName::k##Name)) {         \
+-      return Convert(__RT_impl_##Name(args, isolate));                     \
++      return Convert(v8trace_scope.Return(__RT_impl_##Name(args, isolate)));                     \
+     } else {                                                               \
+       DisallowGarbageCollection no_gc;                                     \
+-      return Convert(__RT_impl_##Name(args, isolate));                     \
++      return Convert(v8trace_scope.Return(__RT_impl_##Name(args, isolate)));                     \
+     }                                                                      \
+   }                                                                        \
+                                                                            \
+--- a/src/execution/isolate.cc
++++ b/src/execution/isolate.cc
+@@ -3,6 +3,9 @@
+ // found in the LICENSE file.
+ 
+ #include "src/execution/isolate.h"
++#include "src/runtime/v8trace-detail.h"
++#include "src/runtime/v8trace-env.h"
++#include "src/runtime/v8trace-aux.h"
+ 
+ #include <stdlib.h>
+ 
+@@ -2677,6 +2680,11 @@
+ Tagged<Object> Isolate::Throw(Tagged<Object> raw_exception,
+                               MessageLocation* location,
+                               bool is_stack_overflow) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::VmpException(this, raw_exception);
++  v8trace::EnvException(this, raw_exception);
++#endif
++  v8trace::JsException(this, raw_exception);
+   if (has_exception()) {
+     // A termination exception may have been thrown while preparing
+     // {raw_exception}, e.g. by the near heap limit callback
+@@ -5002,6 +5010,10 @@
+ #endif  // V8_CPPGC_MICROTASK_QUEUE
+ 
+ void Isolate::Deinit() {
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::VmpIsolateDispose(this);
++  v8trace::EnvIsolateDispose(this);
++#endif
+   TRACE_ISOLATE(deinit);
+ 
+ #ifdef V8_ENABLE_REGEXP_DIAGNOSTICS
+--- a/src/execution/vm-state-inl.h
++++ b/src/execution/vm-state-inl.h
+@@ -6,6 +6,7 @@
+ #define V8_EXECUTION_VM_STATE_INL_H_
+ 
+ #include "src/execution/vm-state.h"
++#include "src/runtime/v8trace-detail.h"
+ // Include the non-inl header before the rest of the headers.
+ 
+ #include "src/base/logging.h"
+@@ -84,9 +85,11 @@
+   // embedder via V8 Api). So, clear it to ensure correctness of
+   // Isolate::GetIncumbentContext().
+   vm_state_.isolate_->clear_topmost_script_having_context();
++  v8trace_call_id_ = v8trace::NativeCallbackEnter(isolate, callback, exception_context, callback_info);
+ }
+ 
+ ExternalCallbackScope::~ExternalCallbackScope() {
++  v8trace::NativeCallbackExit(vm_state_.isolate_, v8trace_call_id_, exception_context_, callback_info_);
+   vm_state_.isolate_->set_external_callback_scope(previous_scope_);
+   // JS code might have been executed by the callback and it could have changed
+   // {topmost_script_having_context}, clear it to ensure correctness of
+--- a/src/execution/vm-state.h
++++ b/src/execution/vm-state.h
+@@ -39,6 +39,7 @@
+       v8::ExceptionContext exception_context = v8::ExceptionContext::kUnknown,
+       const void* callback_info = nullptr);
+   inline ~ExternalCallbackScope();
++  uint64_t v8trace_call_id() const { return v8trace_call_id_; }
+   Address callback() { return callback_; }
+   Address* callback_entrypoint_address() {
+     if (callback_ == kNullAddress) return nullptr;
+@@ -55,6 +56,7 @@
+   const void* callback_info() { return callback_info_; }
+ 
+  private:
++  uint64_t v8trace_call_id_ = 0;
+   Address const callback_;
+   // v8::FunctionCallbackInfo* or v8::PropertyCallbackInfo* or nullptr.
+   const void* const callback_info_;
+--- a/src/flags/flag-definitions.h
++++ b/src/flags/flag-definitions.h
+@@ -1272,6 +1272,70 @@
+               "filter for selecting which functions to print bytecode")
+ DEFINE_BOOL(omit_default_ctors, true, "omit calling default ctors in bytecode")
+ #ifdef V8_TRACE_UNOPTIMIZED
++DEFINE_STRING(trace_detail_filter, "", "producer detail selection v1")
++DEFINE_BOOL(trace_jscall_values, true, "observe selected JSCall values")
++DEFINE_BOOL(trace_jscall_detail, false, "record native execution detail")
++DEFINE_NEG_IMPLICATION(trace_jscall_detail, sparkplug)
++DEFINE_NEG_IMPLICATION(trace_jscall_detail, maglev)
++DEFINE_NEG_IMPLICATION(trace_jscall_detail, turbofan)
++DEFINE_NEG_IMPLICATION(trace_jscall_detail, enable_lazy_source_positions)
++DEFINE_BOOL(trace_native_detail, false, "record native execution detail")
++DEFINE_NEG_IMPLICATION(trace_native_detail, sparkplug)
++DEFINE_NEG_IMPLICATION(trace_native_detail, maglev)
++DEFINE_NEG_IMPLICATION(trace_native_detail, turbofan)
++DEFINE_NEG_IMPLICATION(trace_native_detail, enable_lazy_source_positions)
++DEFINE_BOOL(trace_wasm_detail, false, "record native execution detail")
++DEFINE_NEG_IMPLICATION(trace_wasm_detail, sparkplug)
++DEFINE_NEG_IMPLICATION(trace_wasm_detail, maglev)
++DEFINE_NEG_IMPLICATION(trace_wasm_detail, turbofan)
++DEFINE_NEG_IMPLICATION(trace_wasm_detail, enable_lazy_source_positions)
++#ifdef V8_ENABLE_DRUMBRAKE
++DEFINE_IMPLICATION(trace_wasm_detail, wasm_jitless)
++DEFINE_NEG_IMPLICATION(trace_wasm_detail, drumbrake_super_instructions)
++DEFINE_NEG_IMPLICATION(trace_wasm_detail, drumbrake_register_optimization)
++#ifdef V8_ENABLE_DRUMBRAKE_TRACING
++DEFINE_IMPLICATION(trace_wasm_detail, trace_drumbrake_execution)
++#endif
++#endif
++DEFINE_BOOL(trace_wasm_modules, false, "observe complete WASM module input bytes without DrumBrake")
++DEFINE_BOOL(trace_vmp, false, "observe explicitly confirmed VM state sites")
++DEFINE_STRING(trace_vmp_config, "", "confirmed VM site descriptor token")
++DEFINE_NEG_IMPLICATION(trace_vmp, sparkplug)
++DEFINE_NEG_IMPLICATION(trace_vmp, maglev)
++DEFINE_NEG_IMPLICATION(trace_vmp, turbofan)
++DEFINE_NEG_IMPLICATION(trace_vmp, enable_lazy_source_positions)
++DEFINE_UINT(trace_vmp_depth, 2, "explicit VM observation budget")
++DEFINE_UINT(trace_vmp_nodes, 256, "explicit VM observation budget")
++DEFINE_UINT(trace_vmp_properties, 4096, "explicit VM observation budget")
++DEFINE_UINT(trace_vmp_typed_bytes, 16777216, "explicit VM observation budget")
++DEFINE_UINT(trace_vmp_max_active, 4096, "explicit VM observation budget")
++DEFINE_BOOL(trace_env, false, "observe selected host properties without JS wrappers")
++DEFINE_BOOL(trace_env_absent, false, "native environment absent observations")
++DEFINE_IMPLICATION(trace_env_absent, trace_env)
++DEFINE_BOOL(trace_env_interfaces, false, "native environment interfaces observations")
++DEFINE_IMPLICATION(trace_env_interfaces, trace_env)
++DEFINE_BOOL(trace_env_mutations, false, "native environment mutations observations")
++DEFINE_IMPLICATION(trace_env_mutations, trace_env)
++DEFINE_BOOL(trace_env_inventory, false, "native environment inventory observations")
++DEFINE_IMPLICATION(trace_env_inventory, trace_env)
++DEFINE_NEG_IMPLICATION(trace_env, sparkplug)
++DEFINE_NEG_IMPLICATION(trace_env, maglev)
++DEFINE_NEG_IMPLICATION(trace_env, turbofan)
++DEFINE_NEG_IMPLICATION(trace_env, enable_lazy_source_positions)
++DEFINE_STRING(trace_env_filter, "", "independent native environment source filter")
++DEFINE_UINT(trace_env_inventory_properties, 65536, "explicit named inventory property budget")
++DEFINE_BOOL(trace_jscall_closure, false, "observe selected lexical bindings per JSCall phase")
++DEFINE_IMPLICATION(trace_jscall_closure, trace_jscall_detail)
++DEFINE_UINT(trace_closure_scopes, 32, "explicit lexical observation scopes budget")
++DEFINE_UINT(trace_closure_bindings, 4096, "explicit lexical observation bindings budget")
++DEFINE_UINT(trace_closure_depth, 2, "explicit lexical observation depth budget")
++DEFINE_UINT(trace_closure_nodes, 256, "explicit lexical observation nodes budget")
++DEFINE_UINT(trace_closure_properties, 4096, "explicit lexical observation properties budget")
++DEFINE_BOOL(trace_opcode, false, "record executed Ignition instructions to v8.opcode")
++DEFINE_NEG_IMPLICATION(trace_opcode, sparkplug)
++DEFINE_NEG_IMPLICATION(trace_opcode, maglev)
++DEFINE_NEG_IMPLICATION(trace_opcode, turbofan)
++DEFINE_NEG_IMPLICATION(trace_opcode, enable_lazy_source_positions)
+ DEFINE_DEVELOPER_FLAG(
+     trace_unoptimized,
+     "trace the bytecodes executed by all unoptimized execution")
+--- a/src/inspector/v8-console.cc
++++ b/src/inspector/v8-console.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/inspector/v8-console.h"
++#include "src/runtime/v8trace-browser-api.h"
+ 
+ #include <array>
+ #include <atomic>
+@@ -82,7 +83,7 @@
+   }
+ 
+   void reportCall(ConsoleAPIType type) {
+-    if (!m_info.Length()) return;
++    if (!m_info.Length()) { v8::internal::v8trace::BrowserConsole(isolate(), static_cast<int>(type), {}); return; }
+     v8::LocalVector<v8::Value> arguments(isolate());
+     arguments.reserve(m_info.Length());
+     for (int i = 0; i < m_info.Length(); ++i) arguments.push_back(m_info[i]);
+@@ -114,6 +115,7 @@
+ 
+   void reportCall(ConsoleAPIType type,
+                   std::span<const v8::Local<v8::Value>> arguments) {
++    v8::internal::v8trace::BrowserConsole(isolate(), static_cast<int>(type), arguments);
+     if (!groupId()) return;
+     // Depending on the type of the console message, we capture only parts of
+     // the stack trace, or no stack trace at all.
+--- a/src/inspector/v8-inspector-impl.cc
++++ b/src/inspector/v8-inspector-impl.cc
+@@ -29,6 +29,7 @@
+  */
+ 
+ #include "src/inspector/v8-inspector-impl.h"
++#include "src/runtime/v8trace-browser-api.h"
+ 
+ #include <vector>
+ 
+@@ -371,6 +372,8 @@
+     v8::Local<v8::Value> exception, StringView detailedMessage, StringView url,
+     unsigned lineNumber, unsigned columnNumber,
+     std::unique_ptr<V8StackTrace> stackTrace, int scriptId) {
++  auto v8trace_stack = stackTrace ? stackTrace->toString() : nullptr;
++  v8::internal::v8trace::BrowserException(m_isolate, exception, toV8String(m_isolate, toString16(detailedMessage)), toV8String(m_isolate, toString16(url)), lineNumber, columnNumber, scriptId, toV8String(m_isolate, v8trace_stack ? toString16(v8trace_stack->string()) : String16()));
+   int groupId = contextGroupId(context);
+   if (!groupId || m_muteExceptionsMap[groupId]) return 0;
+   std::unique_ptr<V8StackTraceImpl> stackTraceImpl(
+--- a/src/interpreter/bytecode-generator.cc
++++ b/src/interpreter/bytecode-generator.cc
+@@ -1793,7 +1793,7 @@
+ 
+   FunctionLiteral* literal = info()->literal();
+   // Emit tracing call if requested to do so.
+-  if (v8_flags.trace) builder()->CallRuntime(Runtime::kTraceEnter);
++  if (v8_flags.trace || v8_flags.trace_jscall_detail) builder()->CallRuntime(Runtime::kTraceEnter);
+ 
+   // Increment the function-scope block coverage counter.
+   BuildIncrementBlockCoverageCounterIfEnabled(literal, SourceRangeKind::kBody);
+@@ -4841,7 +4841,7 @@
+ }
+ 
+ void BytecodeGenerator::BuildReturn(int source_position) {
+-  if (v8_flags.trace) {
++  if (v8_flags.trace || v8_flags.trace_jscall_detail) {
+     RegisterAllocationScope register_scope(this);
+     Register result = register_allocator()->NewRegister();
+     // Runtime returns {result} value, preserving accumulator.
+--- a/src/interpreter/interpreter-assembler.cc
++++ b/src/interpreter/interpreter-assembler.cc
+@@ -1379,6 +1379,9 @@
+ #endif
+ 
+   StoreRegisterForShortStar(GetAccumulator(), target_bytecode);
++#ifdef V8_TRACE_UNOPTIMIZED
++  TraceBytecode(Runtime::kTraceUnoptimizedBytecodeExit);
++#endif
+ 
+   DCHECK_EQ(implicit_register_use_,
+             Bytecodes::GetImplicitRegisterUse(bytecode_));
+@@ -1391,6 +1394,9 @@
+ void InterpreterAssembler::Dispatch() {
+   Comment("========= Dispatch");
+   DCHECK_IMPLIES(Bytecodes::MakesCallAlongCriticalPath(bytecode_), made_call_);
++#ifdef V8_TRACE_UNOPTIMIZED
++  TraceBytecode(Runtime::kTraceUnoptimizedBytecodeExit);
++#endif
+   TNode<IntPtrT> target_offset = Advance();
+   TNode<WordT> target_bytecode = LoadBytecode(target_offset);
+   DispatchToBytecodeWithOptionalStarLookahead(target_bytecode);
+@@ -1598,8 +1604,37 @@
+ }
+ 
+ void InterpreterAssembler::TraceBytecode(Runtime::FunctionId function_id) {
++  if (function_id != Runtime::kTraceUnoptimizedBytecodeEntry &&
++      function_id != Runtime::kTraceUnoptimizedBytecodeExit) {
++    CallRuntime(function_id, GetContext(), BytecodeArrayTaggedPointer(),
++                SmiTag(BytecodeOffset()), GetAccumulatorUnchecked());
++    return;
++  }
++  auto flag = [&](ExternalReference address) {
++    return UncheckedCast<Word32T>(Load(MachineType::Uint8(), ExternalConstant(address)));
++  };
++  TNode<Word32T> enabled = Word32Or(flag(ExternalReference::address_of_v8trace_opcode_flag()),
++      Word32Or(flag(ExternalReference::address_of_v8trace_ignition_flag()),
++               flag(ExternalReference::address_of_v8trace_baseline_flag())));
++  enabled = Word32Or(enabled, flag(ExternalReference::address_of_v8trace_env_flag()));
++  enabled = Word32Or(enabled, flag(ExternalReference::address_of_v8trace_vmp_flag()));
++  const char* operation = Bytecodes::ToString(bytecode_);
++  if (std::strncmp(operation, "Call", 4) == 0 || std::strncmp(operation, "Construct", 9) == 0)
++    enabled = Word32Or(enabled, flag(ExternalReference::address_of_v8trace_native_flag()));
++  if (function_id == Runtime::kTraceUnoptimizedBytecodeEntry) {
++    if (bytecode_ == Bytecode::kSuspendGenerator || bytecode_ == Bytecode::kResumeGenerator)
++      enabled = Word32Or(enabled, flag(ExternalReference::address_of_v8trace_jscall_flag()));
++  }
++  Label observe(this), done(this);
++  Branch(Word32NotEqual(enabled, Int32Constant(0)), &observe, &done);
++  BIND(&observe);
++  TNode<IntPtrT> prefix = BytecodeOffset();
++  if (operand_scale() != OperandScale::kSingle && !Bytecodes::IsShortStar(bytecode_))
++    prefix = IntPtrSub(prefix, IntPtrConstant(1));
+   CallRuntime(function_id, GetContext(), BytecodeArrayTaggedPointer(),
+-              SmiTag(BytecodeOffset()), GetAccumulatorUnchecked());
++              SmiTag(BytecodeOffset()), GetAccumulatorUnchecked(), SmiTag(prefix));
++  Goto(&done);
++  BIND(&done);
+ }
+ 
+ // static
+--- a/src/objects/js-objects.cc
++++ b/src/objects/js-objects.cc
+@@ -3,6 +3,9 @@
+ // found in the LICENSE file.
+ 
+ #include "src/objects/js-objects.h"
++#ifdef V8_TRACE_UNOPTIMIZED
++#include "src/runtime/v8trace-env.h"
++#endif
+ 
+ #include <limits>
+ #include <optional>
+@@ -104,6 +107,10 @@
+ 
+ // static
+ Maybe<bool> JSReceiver::HasProperty(LookupIterator* it) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  auto v8trace_operation = v8trace::EnvQueryEnter(it, "has");
++#endif
++  auto v8trace_result = [&]() -> Maybe<bool> {
+   for (;; it->Next()) {
+     switch (it->state()) {
+       case LookupIterator::TRANSITION:
+@@ -148,12 +155,22 @@
+     }
+     UNREACHABLE();
+   }
++
++  }();
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::EnvQueryExit(it, v8trace_operation, v8trace_result.IsNothing() ? -1 : v8trace_result.FromJust() ? 1 : 0, nullptr);
++#endif
++  return v8trace_result;
+ }
+ 
+ // static
+ Maybe<bool> JSReceiver::HasOwnProperty(Isolate* isolate,
+                                        DirectHandle<JSReceiver> object,
+                                        DirectHandle<Name> name) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  auto v8trace_operation = v8trace::EnvValueEnter(isolate, *object, *name, "has-own", false, ReadOnlyRoots(isolate).undefined_value());
++#endif
++  auto v8trace_result = [&]() -> Maybe<bool> {
+   if (IsJSModuleNamespace(*object)) {
+     PropertyDescriptor desc;
+     return JSReceiver::GetOwnPropertyDescriptor(isolate, object, name, &desc);
+@@ -169,6 +186,12 @@
+       JSReceiver::GetOwnPropertyAttributes(isolate, object, name);
+   MAYBE_RETURN(attributes, Nothing<bool>());
+   return Just(attributes.FromJust() != ABSENT);
++
++  }();
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::EnvValueExit(isolate, v8trace_operation, v8trace_result.IsNothing() ? -1 : v8trace_result.FromJust() ? 1 : 0);
++#endif
++  return v8trace_result;
+ }
+ 
+ Handle<Object> JSReceiver::GetDataProperty(LookupIterator* it,
+@@ -990,6 +1013,10 @@
+ 
+ Maybe<bool> JSReceiver::DeleteProperty(LookupIterator* it,
+                                        LanguageMode language_mode) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  auto v8trace_operation = v8trace::EnvQueryEnter(it, "delete-native", true);
++#endif
++  auto v8trace_result = [&]() -> Maybe<bool> {
+   it->UpdateProtector();
+ 
+   Isolate* isolate = it->isolate();
+@@ -1089,6 +1116,12 @@
+     }
+     UNREACHABLE();
+   }
++
++  }();
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::EnvValueExit(it->isolate(), v8trace_operation, v8trace_result.IsNothing() ? -1 : v8trace_result.FromJust() ? 1 : 0);
++#endif
++  return v8trace_result;
+ }
+ 
+ Maybe<bool> JSReceiver::DeleteElement(Isolate* isolate,
+@@ -1237,6 +1270,10 @@
+                                           DirectHandle<Object> key,
+                                           PropertyDescriptor* desc,
+                                           Maybe<ShouldThrow> should_throw) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  auto v8trace_operation = v8trace::EnvValueEnter(isolate, *object, *key, "define-own", true, ReadOnlyRoots(isolate).undefined_value(), desc);
++#endif
++  auto v8trace_result = [&]() -> Maybe<bool> {
+   if (IsJSArray(*object)) {
+     return JSArray::DefineOwnProperty(isolate, Cast<JSArray>(object), key, desc,
+                                       should_throw);
+@@ -1268,6 +1305,12 @@
+   // (https://tc39.es/ecma262/#sec-arguments-exotic-objects-defineownproperty-p-desc).
+   return OrdinaryDefineOwnProperty(isolate, Cast<JSObject>(object), key, desc,
+                                    should_throw);
++
++  }();
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::EnvValueExit(isolate, v8trace_operation, v8trace_result.IsNothing() ? -1 : v8trace_result.FromJust() ? 1 : 0);
++#endif
++  return v8trace_result;
+ }
+ 
+ // static
+@@ -1972,6 +2015,10 @@
+ // static
+ Maybe<bool> JSReceiver::GetOwnPropertyDescriptor(LookupIterator* it,
+                                                  PropertyDescriptor* desc) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  auto v8trace_operation = v8trace::EnvQueryEnter(it, "own-descriptor");
++#endif
++  auto v8trace_result = [&]() -> Maybe<bool> {
+   Isolate* isolate = it->isolate();
+   // "Virtual" dispatch.
+   if (it->IsFound() && IsJSProxy(*it->GetHolder<JSReceiver>())) {
+@@ -2031,6 +2078,12 @@
+   DCHECK(PropertyDescriptor::IsAccessorDescriptor(desc) !=
+          PropertyDescriptor::IsDataDescriptor(desc));
+   return Just(true);
++
++  }();
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::EnvQueryExit(it, v8trace_operation, v8trace_result.IsNothing() ? -1 : v8trace_result.FromJust() ? 1 : 0, desc);
++#endif
++  return v8trace_result;
+ }
+ 
+ Maybe<bool> JSReceiver::SetIntegrityLevel(Isolate* isolate,
+@@ -2416,6 +2469,10 @@
+                                      DirectHandle<Object> value,
+                                      bool from_javascript,
+                                      ShouldThrow should_throw) {
++#ifdef V8_TRACE_UNOPTIMIZED
++  auto v8trace_operation = v8trace::EnvValueEnter(isolate, *object, ReadOnlyRoots(isolate).undefined_value(), "set-prototype", true, *value);
++#endif
++  auto v8trace_result = [&]() -> Maybe<bool> {
+   if (IsWasmObject(*object)) {
+     RETURN_FAILURE(isolate, should_throw,
+                    NewTypeError(MessageTemplate::kWasmObjectsAreOpaque));
+@@ -2432,6 +2489,12 @@
+   }
+   return JSObject::SetPrototype(isolate, Cast<JSObject>(object), value,
+                                 from_javascript, should_throw);
++
++  }();
++#ifdef V8_TRACE_UNOPTIMIZED
++  v8trace::EnvValueExit(isolate, v8trace_operation, v8trace_result.IsNothing() ? -1 : v8trace_result.FromJust() ? 1 : 0);
++#endif
++  return v8trace_result;
+ }
+ 
+ bool JSReceiver::HasProxyInPrototype(Isolate* isolate) {
+--- a/src/runtime/runtime-test.cc
++++ b/src/runtime/runtime-test.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/runtime/runtime.h"
++#include "src/runtime/v8trace-detail.h"
+ 
+ #include <stdio.h>
+ 
+@@ -1715,6 +1716,10 @@
+ }
+ 
+ RUNTIME_FUNCTION(Runtime_TraceEnter) {
++  if (v8_flags.trace_jscall_detail) {
++    v8trace::JsCall(isolate, true, ReadOnlyRoots(isolate).undefined_value());
++    return ReadOnlyRoots(isolate).undefined_value();
++  }
+   SealHandleScope shs(isolate);
+   PrintIndentation(StackSize(isolate));
+   JavaScriptFrame::PrintTop(isolate, stdout, true, false);
+@@ -1723,6 +1728,10 @@
+ }
+ 
+ RUNTIME_FUNCTION(Runtime_TraceExit) {
++  if (v8_flags.trace_jscall_detail) {
++    v8trace::JsCall(isolate, false, args[0]);
++    return args[0];
++  }
+   SealHandleScope shs(isolate);
+   CHECK_UNLESS_FUZZING(args.length() == 1);
+   Tagged<Object> obj = args[0];
+--- a/src/runtime/runtime-trace.cc
++++ b/src/runtime/runtime-trace.cc
+@@ -20,6 +20,14 @@
+ #include "src/dumpling/dumpling-manager.h"
+ #endif
+ #include "src/utils/ostreams.h"
++#ifdef V8_TRACE_UNOPTIMIZED
++#include "src/runtime/v8trace-opcode.h"
++#include "src/runtime/v8trace-detail-inl.h"
++#include "src/runtime/v8trace-env-inl.h"
++#include "src/runtime/v8trace-identity-inl.h"
++#include "src/runtime/v8trace-aux-inl.h"
++#include "src/runtime/v8trace-vmp-inl.h"
++#endif
+ 
+ namespace v8 {
+ namespace internal {
+@@ -27,6 +35,18 @@
+ namespace {
+ 
+ #if defined(V8_TRACE_UNOPTIMIZED) || defined(V8_DUMPLING)
++
++class ExecutionTraceIterator : public interpreter::BytecodeArrayIterator {
++ public:
++  ExecutionTraceIterator(Handle<BytecodeArray> array, int offset,
++                         DisallowGarbageCollection& no_gc)
++      : BytecodeArrayIterator(array, 0, no_gc) {
++    // The handler supplies a verified prefix offset; no scan or GC callback.
++    CHECK_GE(offset, 0);
++    CHECK_LT(offset, array->length());
++    SetOffsetUnchecked(offset);
++  }
++};
+ 
+ void AdvanceToOffsetForTracing(
+     interpreter::BytecodeArrayIterator& bytecode_iterator, int offset) {
+@@ -117,7 +137,8 @@
+ #ifdef V8_TRACE_UNOPTIMIZED
+ 
+ RUNTIME_FUNCTION(Runtime_TraceUnoptimizedBytecodeEntry) {
+-  if (!v8_flags.trace_ignition && !v8_flags.trace_baseline_exec) {
++  if (!v8_flags.trace_ignition && !v8_flags.trace_baseline_exec &&
++      !v8_flags.trace_opcode && !v8_flags.trace_native_detail && !v8_flags.trace_jscall_detail && !v8_flags.trace_env && !v8_flags.trace_vmp) {
+     return ReadOnlyRoots(isolate).undefined_value();
+   }
+ 
+@@ -125,7 +146,8 @@
+   UnoptimizedJSFrame* frame =
+       reinterpret_cast<UnoptimizedJSFrame*>(frame_iterator.frame());
+ 
+-  if (frame->is_interpreted() && !v8_flags.trace_ignition) {
++  if (frame->is_interpreted() && !v8_flags.trace_ignition &&
++      !v8_flags.trace_opcode && !v8_flags.trace_native_detail && !v8_flags.trace_jscall_detail && !v8_flags.trace_env && !v8_flags.trace_vmp) {
+     return ReadOnlyRoots(isolate).undefined_value();
+   }
+   if (frame->is_baseline() && !v8_flags.trace_baseline_exec) {
+@@ -133,14 +155,24 @@
+   }
+ 
+   SealHandleScope shs(isolate);
+-  DCHECK_EQ(3, args.length());
++  DCHECK_EQ(4, args.length());
+   Handle<BytecodeArray> bytecode_array = CheckedCast<BytecodeArray>(args.at(0));
+   int bytecode_offset = args.smi_value_at(1);
+   Handle<Object> accumulator = args.at(2);
+ 
+   int offset = bytecode_offset - BytecodeArray::kHeaderSize + kHeapObjectTag;
+-  interpreter::BytecodeArrayIterator bytecode_iterator(bytecode_array);
+-  AdvanceToOffsetForTracing(bytecode_iterator, offset);
++  DisallowGarbageCollection no_gc;
++  int prefix_offset = args.smi_value_at(3) - BytecodeArray::kHeaderSize + kHeapObjectTag;
++  ExecutionTraceIterator bytecode_iterator(bytecode_array, prefix_offset, no_gc);
++  if ((v8_flags.trace_opcode || v8_flags.trace_native_detail || v8_flags.trace_jscall_detail || v8_flags.trace_env || v8_flags.trace_vmp) && frame->is_interpreted()) {
++    v8trace::VmpInstruction(isolate, frame, bytecode_iterator, offset, *accumulator, true);
++    v8trace::EnvInstruction(isolate, frame, bytecode_iterator, offset, *accumulator, true);
++    v8trace::JsInstruction(isolate, frame, bytecode_iterator, offset, *accumulator);
++    v8trace::NativeCallsite(isolate, frame, bytecode_iterator, offset, *accumulator);
++    if (v8_flags.trace_opcode) v8trace::Record(isolate, frame, bytecode_array, bytecode_iterator, offset,
++                    accumulator, true);
++    return ReadOnlyRoots(isolate).undefined_value();
++  }
+   if (offset == bytecode_iterator.current_offset()) {
+     StdoutStream os;
+ 
+@@ -165,7 +197,20 @@
+ }
+ 
+ RUNTIME_FUNCTION(Runtime_TraceUnoptimizedBytecodeExit) {
+-  if (!v8_flags.trace_ignition && !v8_flags.trace_baseline_exec) {
++  if (!v8_flags.trace_ignition && !v8_flags.trace_baseline_exec &&
++      !v8_flags.trace_opcode && !v8_flags.trace_native_detail && !v8_flags.trace_jscall_detail && !v8_flags.trace_env && !v8_flags.trace_vmp) {
++    return ReadOnlyRoots(isolate).undefined_value();
++  }
++
++  if (!v8_flags.trace_vmp && !v8_flags.trace_env && !v8_flags.trace_opcode && !v8_flags.trace_ignition && !v8_flags.trace_baseline_exec) {
++    if (v8_flags.trace_native_detail) {
++      JavaScriptStackFrameIterator it(isolate);
++      if (!it.done() && it.frame()->is_interpreted()) {
++        auto frame = reinterpret_cast<UnoptimizedJSFrame*>(it.frame());
++        int offset = args.smi_value_at(3) - BytecodeArray::kHeaderSize + kHeapObjectTag;
++        v8trace::NativeCallsiteComplete(isolate, frame, offset, args[2]);
++      }
++    }
+     return ReadOnlyRoots(isolate).undefined_value();
+   }
+ 
+@@ -173,7 +218,8 @@
+   UnoptimizedJSFrame* frame =
+       reinterpret_cast<UnoptimizedJSFrame*>(frame_iterator.frame());
+ 
+-  if (frame->is_interpreted() && !v8_flags.trace_ignition) {
++  if (frame->is_interpreted() && !v8_flags.trace_ignition &&
++      !v8_flags.trace_opcode && !v8_flags.trace_native_detail && !v8_flags.trace_jscall_detail && !v8_flags.trace_env && !v8_flags.trace_vmp) {
+     return ReadOnlyRoots(isolate).undefined_value();
+   }
+   if (frame->is_baseline() && !v8_flags.trace_baseline_exec) {
+@@ -181,14 +227,29 @@
+   }
+ 
+   SealHandleScope shs(isolate);
+-  DCHECK_EQ(3, args.length());
++  DCHECK_EQ(4, args.length());
+   Handle<BytecodeArray> bytecode_array = CheckedCast<BytecodeArray>(args.at(0));
+   int bytecode_offset = args.smi_value_at(1);
+   Handle<Object> accumulator = args.at(2);
+ 
+   int offset = bytecode_offset - BytecodeArray::kHeaderSize + kHeapObjectTag;
+-  interpreter::BytecodeArrayIterator bytecode_iterator(bytecode_array);
+-  AdvanceToOffsetForTracing(bytecode_iterator, offset);
++  DisallowGarbageCollection no_gc;
++  int prefix_offset = args.smi_value_at(3) - BytecodeArray::kHeaderSize + kHeapObjectTag;
++  ExecutionTraceIterator bytecode_iterator(bytecode_array, prefix_offset, no_gc);
++  if (frame->is_interpreted()) {
++    v8trace::VmpInstruction(isolate, frame, bytecode_iterator, offset, *accumulator, false);
++    v8trace::EnvInstruction(isolate, frame, bytecode_iterator, offset, *accumulator, false);
++    v8trace::NativeCallsiteComplete(isolate, frame, prefix_offset, *accumulator);
++  }
++  if ((v8_flags.trace_opcode || v8_flags.trace_native_detail || v8_flags.trace_jscall_detail || v8_flags.trace_env || v8_flags.trace_vmp) && frame->is_interpreted()) {
++    if (bytecode_iterator.current_operand_scale() ==
++            interpreter::OperandScale::kSingle ||
++        offset > bytecode_iterator.current_offset()) {
++      if (v8_flags.trace_opcode) v8trace::Record(isolate, frame, bytecode_array, bytecode_iterator, offset,
++                      accumulator, false);
++    }
++    return ReadOnlyRoots(isolate).undefined_value();
++  }
+   // The offset comparison here ensures registers only printed when the
+   // (potentially) widened bytecode has completed. The iterator reports
+   // the offset as the offset of the prefix bytecode.
+--- a/src/runtime/runtime.h
++++ b/src/runtime/runtime.h
+@@ -191,8 +191,8 @@
+ 
+ #ifdef V8_TRACE_UNOPTIMIZED
+ #define FOR_EACH_INTRINSIC_TRACE_UNOPTIMIZED(F, I) \
+-  F(TraceUnoptimizedBytecodeEntry, 3, 1)           \
+-  F(TraceUnoptimizedBytecodeExit, 3, 1)
++  F(TraceUnoptimizedBytecodeEntry, 4, 1)           \
++  F(TraceUnoptimizedBytecodeExit, 4, 1)
+ #else
+ #define FOR_EACH_INTRINSIC_TRACE_UNOPTIMIZED(F, I)
+ #endif
+--- /dev/null
++++ b/src/runtime/v8trace-aux-inl.h
+@@ -0,0 +1,92 @@
++#ifndef V8_RUNTIME_V8TRACE_AUX_INL_H_
++#define V8_RUNTIME_V8TRACE_AUX_INL_H_
++#include "src/runtime/v8trace-aux.h"
++#include "src/runtime/v8trace-call-ledger.h"
++#include "src/base/platform/platform.h"
++#include <cstring>
++namespace v8::internal::v8trace {
++namespace aux {
++inline v8trace_call_ledger::Ledger& Session() { static v8trace_call_ledger::Ledger value; return value; }
++struct Owner { std::mutex mutex; int64_t instance = -1; };
++inline Owner& TraceOwner() { static Owner value; return value; }
++inline const char* Category(const char* channel) { return std::string_view(channel) == "vmp" ? "disabled-by-default-v8.vmp" : "disabled-by-default-v8.wasm-module"; }
++inline std::string Base64(base::Vector<const uint8_t> bytes) {
++  constexpr char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"; std::string output; output.reserve((bytes.size() + 2) / 3 * 4);
++  for (size_t i = 0; i < bytes.size(); i += 3) { uint32_t value = uint32_t(bytes[i]) << 16; if (i + 1 < bytes.size()) value |= uint32_t(bytes[i + 1]) << 8; if (i + 2 < bytes.size()) value |= bytes[i + 2]; output += table[value >> 18]; output += table[(value >> 12) & 63]; output += i + 1 < bytes.size() ? table[(value >> 6) & 63] : '='; output += i + 2 < bytes.size() ? table[value & 63] : '='; } return output;
++}
++inline void Text(std::ostream& output, std::string_view value) { size_t index = 0; v8trace_json::WriteUtf16(output, value.size(), [&] { return uint16_t(uint8_t(value[index++])); }); }
++inline std::shared_ptr<v8trace_call_ledger::Producer> Producer() {
++  auto& session = Session(); static thread_local std::shared_ptr<v8trace_call_ledger::Producer> producer;
++  if (!producer || producer->epoch != session.epoch.load()) producer = session.Register(base::OS::GetCurrentThreadId());
++  return producer;
++}
++template<class F> void Emit(const char* channel, F body) {
++  if (!AuxEnabled(channel)) return;
++  auto& session = Session(); auto producer = Producer();
++  v8trace_call_ledger::WriteGuard guard(session, producer); if (!guard) return; producer->attempted.fetch_add(1);
++#if defined(V8_USE_PERFETTO)
++  // Value serializers may emit chunks; nested Perfetto callbacks suppress them.
++  std::ostringstream payload; payload.imbue(std::locale::classic()); body(payload);
++  const perfetto::DynamicCategory category(Category(channel));
++  TRACE_EVENT_INSTANT(category, "V8TraceAux", [&](perfetto::EventContext context) {
++    std::ostringstream output; output.imbue(std::locale::classic());
++    output << "{\"protocol\":\"v8trace/state/1\",\"producerFamily\":\"v8-aux\",\"channel\":\"" << channel << "\",\"producerId\":\"" << producer->producer_id << "\",\"epoch\":\"" << producer->epoch << "\",\"producerSeq\":\"" << producer->emitted.fetch_add(1) + 1 << '"'; output << payload.str() << '}'; context.AddDebugAnnotation("record", output.str());
++  });
++#endif
++}
++inline void Boundary(const char* phase) {
++#if defined(V8_USE_PERFETTO)
++  TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.aux"), "V8TraceAuxSession", [&](perfetto::EventContext context) {
++    std::ostringstream output; output << "{\"protocol\":\"v8trace/state-session/1\",\"producerFamily\":\"v8-aux\",\"epoch\":\"" << Session().epoch.load() << "\",\"phase\":\"" << phase << "\",\"selected\":["; bool comma = false;
++    for (auto* channel : {"wasm-module", "vmp"}) if (AuxEnabled(channel)) { if (comma) output << ','; comma = true; output << '"' << channel << '"'; }
++    output << ']'; if (v8_flags.trace_vmp) { output << ",\"vmpConfigToken\":"; Text(output, static_cast<const char*>(v8_flags.trace_vmp_config)); output << ",\"vmpConfigValid\":" << (VmpConfigValid() ? "true" : "false") << ",\"vmpBudget\":{\"depth\":" << static_cast<uint32_t>(v8_flags.trace_vmp_depth) << ",\"nodes\":" << static_cast<uint32_t>(v8_flags.trace_vmp_nodes) << ",\"properties\":" << static_cast<uint32_t>(v8_flags.trace_vmp_properties) << ",\"typedArrayBytes\":" << static_cast<uint32_t>(v8_flags.trace_vmp_typed_bytes) << ",\"maxActive\":" << static_cast<uint32_t>(v8_flags.trace_vmp_max_active) << '}'; } output << '}'; context.AddDebugAnnotation("record", output.str());
++  });
++#endif
++}
++inline void Stop() {
++  for (const auto& producer : Session().Stop()) {
++#if defined(V8_USE_PERFETTO)
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.aux"), "V8TraceAuxStats", [&](perfetto::EventContext context) {
++      std::ostringstream output; output << "{\"protocol\":\"v8trace/state-stats/1\",\"producerFamily\":\"v8-aux\",\"epoch\":\"" << producer.epoch << "\",\"producerThreadId\":\"" << producer.thread_id << "\",\"producerId\":\"" << producer.producer_id << "\",\"attempted\":\"" << producer.attempted << "\",\"emittedEvents\":\"" << producer.emitted << "\",\"final\":" << (producer.final ? "true" : "false") << '}'; context.AddDebugAnnotation("record", output.str());
++    });
++#endif
++  }
++  Boundary("stop");
++}
++inline void Identity(std::ostream& output, Isolate* isolate) {
++  if (!isolate) return; auto identity = v8::V8TraceIdentity(reinterpret_cast<v8::Isolate*>(isolate));
++  output << ",\"identity\":{\"protocol\":\"v8trace/identity/1\",\"isolateId\":\"" << std::hex << identity.isolate_id << std::dec << "\",\"realmId\":\"" << identity.realm_id << "\",\"jsCallId\":\"" << identity.js_call_id << "\",\"nativeCallId\":\"" << identity.native_call_id << "\",\"callProducerId\":\"" << identity.producer_id << "\",\"callEpoch\":\"" << identity.epoch << "\"}";
++}
++inline void Chunks(uint64_t id, uint64_t offset, base::Vector<const uint8_t> bytes) {
++  for (size_t index = 0; index < bytes.size(); index += 32768) { auto count = std::min<size_t>(32768, bytes.size() - index); auto part = bytes.SubVector(index, index + count);
++    if(!AuxEnabled("wasm-module"))return;
++    Emit("wasm-module", [&](std::ostream& output) { output << ",\"kind\":\"value-chunk\",\"operationId\":\"" << id << "\",\"contentId\":\"" << id << "/wire\",\"offset\":\"" << offset + index << "\",\"base64\":\"" << Base64(part) << '"'; });
++  }
++}
++inline void Wire(std::ostream& output, uint64_t id, uint64_t bytes) { output << ",\"wire\":{\"type\":\"byte-reference\",\"contentId\":\"" << id << "/wire\",\"bytes\":\"" << bytes << "\",\"representation\":\"wasm-wire-bytes\"}"; }
++}
++uint64_t AuxId() { static std::atomic_uint64_t value{0}; return value.fetch_add(1, std::memory_order_relaxed) + 1; }
++bool AuxEnabled(const char* channel) {
++  bool enabled = false;
++  if (std::string_view(channel) == "vmp") { if (!v8_flags.trace_vmp) return false; TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("v8.vmp"), &enabled); }
++  else { if (!v8_flags.trace_wasm_modules) return false; TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("v8.wasm-module"), &enabled); }
++  return enabled;
++}
++void AuxSessionStart(uint32_t instance) { if (!AuxEnabled("vmp") && !AuxEnabled("wasm-module")) return; auto& owner = aux::TraceOwner(); std::lock_guard lock(owner.mutex); if (owner.instance != -1) return; owner.instance = instance; aux::Session().Start(); aux::Boundary("start"); }
++void AuxSessionStop(uint32_t instance) { auto& owner = aux::TraceOwner(); std::lock_guard lock(owner.mutex); if (owner.instance == instance) { aux::Stop(); owner.instance = -1; } }
++void AuxSessionShutdown() { auto& owner = aux::TraceOwner(); std::lock_guard lock(owner.mutex); if (owner.instance != -1) { aux::Stop(); owner.instance = -1; } }
++uint64_t WasmInput(Isolate* isolate, base::Vector<const uint8_t> bytes, const char* kind, uint64_t module, std::string_view url, int compilation) {
++  if (!AuxEnabled("wasm-module")) return 0; auto id = AuxId(); aux::Chunks(id, 0, bytes);
++  aux::Emit("wasm-module", [&](std::ostream& output) { output << ",\"kind\":\"module-bytes\",\"operationId\":\"" << id << "\",\"observation\":"; aux::Text(output, kind); output << ",\"moduleId\":\"" << module << "\",\"compilationId\":\"" << compilation << "\",\"byteCoverage\":\"complete-input\",\"urlEncoding\":\"original-utf8-bytes\",\"urlBase64\":\"" << aux::Base64(base::VectorOf(reinterpret_cast<const uint8_t*>(url.data()), url.size())) << '"'; aux::Wire(output, id, bytes.size()); aux::Identity(output, isolate); }); return id;
++}
++void WasmResult(Isolate* isolate, uint64_t attempt, bool success, uint64_t module, const char* message) { if (!attempt) return; aux::Emit("wasm-module", [&](std::ostream& output) { output << ",\"kind\":\"compile-result\",\"operationId\":\"" << attempt << "\",\"success\":" << (success ? "true" : "false") << ",\"moduleId\":\"" << module << "\",\"messageByteEncoding\":\"original-bytes\",\"messageBase64\":\"" << aux::Base64(base::VectorOf(reinterpret_cast<const uint8_t*>(message), std::strlen(message))) << '"'; aux::Identity(output, isolate); }); }
++void WasmPrefix(uint64_t id, uint64_t offset, base::Vector<const uint8_t> bytes) { if (AuxEnabled("wasm-module")) aux::Chunks(id, offset, bytes); }
++void WasmPrefixEnd(uint64_t id, uint64_t bytes, std::string_view url) { aux::Emit("wasm-module", [&](std::ostream& output) { output << ",\"kind\":\"module-bytes\",\"operationId\":\"" << id << "\",\"observation\":\"stream-stopped-prefix\",\"byteCoverage\":\"prefix-only-stream-stopped\",\"urlBase64\":\"" << aux::Base64(base::VectorOf(reinterpret_cast<const uint8_t*>(url.data()), url.size())) << '"'; aux::Wire(output, id, bytes); }); }
++uint64_t WasmArgument(Isolate* isolate,const uint8_t* data,size_t bytes,const char* kind){
++  if(!AuxEnabled("wasm-module"))return 0;auto id=AuxId();std::array<uint8_t,32768> block;
++  for(size_t offset=0;offset<bytes;offset+=block.size()){if(!AuxEnabled("wasm-module"))return 0;auto count=std::min(block.size(),bytes-offset);for(size_t i=0;i<count;++i)block[i]=std::atomic_ref<uint8_t>(const_cast<uint8_t&>(data[offset+i])).load(std::memory_order_relaxed);aux::Chunks(id,offset,base::VectorOf(block.data(),count));}
++  aux::Emit("wasm-module",[&](std::ostream& out){out<<",\"kind\":\"module-bytes\",\"operationId\":\""<<id<<"\",\"observation\":";aux::Text(out,kind);out<<",\"byteCoverage\":\"complete-rejected-input-observation\",\"snapshotScope\":\"relaxed-byte-observation-not-API-consumed-copy\"";aux::Wire(out,id,bytes);aux::Identity(out,isolate);});return id;
++}
++void WasmRejected(Isolate* isolate,const char* reason){aux::Emit("wasm-module",[&](std::ostream& out){out<<",\"kind\":\"module-input-rejected\",\"operationId\":\""<<AuxId()<<"\",\"hasByteSource\":false,\"reason\":";aux::Text(out,reason);aux::Identity(out,isolate);});}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-aux.h
+@@ -0,0 +1,30 @@
++#ifndef V8_RUNTIME_V8TRACE_AUX_H_
++#define V8_RUNTIME_V8TRACE_AUX_H_
++#include <cstdint>
++#include <string_view>
++#include "src/base/vector.h"
++#include "src/common/globals.h"
++#include "src/objects/tagged.h"
++namespace v8::internal {
++class Isolate;
++class UnoptimizedJSFrame;
++namespace interpreter { class BytecodeArrayIterator; }
++namespace v8trace {
++V8_EXPORT_PRIVATE uint64_t AuxId();
++V8_EXPORT_PRIVATE bool AuxEnabled(const char*);
++void AuxSessionStart(uint32_t);
++void AuxSessionStop(uint32_t);
++void AuxSessionShutdown();
++V8_EXPORT_PRIVATE uint64_t WasmInput(Isolate*, base::Vector<const uint8_t>, const char*, uint64_t = 0, std::string_view = {}, int = -1);
++V8_EXPORT_PRIVATE void WasmResult(Isolate*, uint64_t, bool, uint64_t, const char*);
++V8_EXPORT_PRIVATE void WasmPrefix(uint64_t, uint64_t, base::Vector<const uint8_t>);
++V8_EXPORT_PRIVATE void WasmPrefixEnd(uint64_t, uint64_t, std::string_view);
++V8_EXPORT_PRIVATE uint64_t WasmArgument(Isolate*, const uint8_t*, size_t, const char*);
++V8_EXPORT_PRIVATE void WasmRejected(Isolate*, const char*);
++void VmpInstruction(Isolate*, UnoptimizedJSFrame*, interpreter::BytecodeArrayIterator&, int, Tagged<Object>, bool);
++void VmpException(Isolate*, Tagged<Object>);
++bool VmpConfigValid();
++void VmpIsolateDispose(Isolate*);
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-browser-api.h
+@@ -0,0 +1,12 @@
++#ifndef V8_RUNTIME_V8TRACE_BROWSER_API_H_
++#define V8_RUNTIME_V8TRACE_BROWSER_API_H_
++
++#include <span>
++#include "include/v8-forward.h"
++
++namespace v8::internal::v8trace {
++void BrowserConsole(v8::Isolate* isolate, int type, std::span<const v8::Local<v8::Value>> arguments);
++void BrowserException(v8::Isolate* isolate, v8::Local<v8::Value> value, v8::Local<v8::String> message,
++                      v8::Local<v8::String> url, unsigned line, unsigned column, int script_id, v8::Local<v8::String> stack);
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-browser.h
+@@ -0,0 +1,97 @@
++#ifndef V8_RUNTIME_V8TRACE_BROWSER_H_
++#define V8_RUNTIME_V8TRACE_BROWSER_H_
++
++#include <span>
++#include <unordered_map>
++#include "src/api/api-inl.h"
++#include "src/execution/frames-inl.h"
++#include "src/runtime/v8trace-object-values.h"
++
++namespace v8::internal::v8trace {
++inline uint64_t BrowserSequence(const char* channel) {
++  static thread_local std::unordered_map<std::string, uint64_t> sequences;
++  return ++sequences[channel];
++}
++template <class Body>
++inline void BrowserEvent(const char* channel, const char* category,
++                          Isolate* isolate, Body body) {
++#if defined(V8_USE_PERFETTO)
++  const perfetto::DynamicCategory dynamic_category(category);
++  TRACE_EVENT_INSTANT(dynamic_category, "V8TraceBrowser",
++      [&](perfetto::EventContext context) {
++        DisallowGarbageCollection no_gc;
++        std::ostringstream out; out.imbue(std::locale::classic());
++        out << "{\"schema\":\"v8trace/browser/1\",\"channel\":\"" << channel
++            << "\",\"producer\":\"v8\",\"producerSeq\":\"" << BrowserSequence(channel)
++            << "\",\"isolateAddress\":\"" << reinterpret_cast<uintptr_t>(isolate)
++            << "\",\"isolateId\":\"" << std::hex << isolate->debug()->IsolateId()
++            << std::dec << "\",\"contextId\":";
++        if (!isolate->context().is_null()) {
++          auto id = isolate->context()->native_context()->debug_context_id();
++          if (IsSmi(id)) out << Cast<Smi>(id).value(); else out << "null";
++        } else out << "null";
++        out << ",\"objectObservation\":"; ObservationConfigJson(out);
++        body(out); out << '}'; context.AddDebugAnnotation("record", out.str());
++      });
++#endif
++}
++inline void BrowserScript(Isolate* isolate, Tagged<Script> script) {
++  if (!IsString(script->source())) return;
++  BrowserEvent("script", "disabled-by-default-v8.script", isolate, [&](std::ostream& out) {
++    out << ",\"kind\":\"compiled-source\",\"scriptId\":" << script->id()
++        << ",\"url\":";
++    if (IsString(script->name())) JsonString(out, Cast<String>(script->name())); else out << "\"\"";
++    out << ",\"source\":"; JsonString(out, Cast<String>(script->source()));
++    out << ",\"lineOffset\":" << script->line_offset()
++        << ",\"columnOffset\":" << script->column_offset()
++        << ",\"isModule\":" << (script->origin_options().IsModule() ? "true" : "false");
++  });
++}
++inline void BrowserCompileInput(Isolate* isolate, Tagged<String> source, Tagged<Object> name, const char* kind, bool is_module = false) {
++  BrowserEvent("script", "disabled-by-default-v8.script", isolate, [&](std::ostream& out) {
++    out << ",\"kind\":\"compile-input\",\"compilationKind\":\"" << kind << "\",\"scriptId\":null,\"url\":";
++    if (IsString(name)) JsonString(out, Cast<String>(name)); else out << "\"\"";
++    out << ",\"source\":"; JsonString(out, source);
++    out << ",\"isModule\":" << (is_module ? "true" : "false");
++  });
++}
++void BrowserConsole(v8::Isolate* api_isolate, int type,
++                           std::span<const v8::Local<v8::Value>> args) {
++  auto* isolate = reinterpret_cast<Isolate*>(api_isolate);
++  BrowserEvent("console", "disabled-by-default-v8.console", isolate, [&](std::ostream& out) {
++    out << ",\"kind\":\"console-api\",\"typeCode\":" << type << ",\"arguments\":[";
++    for (size_t i = 0; i < args.size(); ++i) {
++      if (i) out << ',';
++      ObservedValue(out, isolate, *Utils::OpenDirectHandle(*args[i]));
++    }
++    out << "],\"stackFrames\":[";
++    bool first = true;
++    for (JavaScriptStackFrameIterator it(isolate); !it.done(); it.Advance()) {
++      if (!first) out << ','; first = false;
++      auto shared = it.frame()->function()->shared();
++      out << "{\"functionName\":"; JsonString(out, shared->Name());
++      out << ",\"functionStart\":" << shared->StartPosition() << ",\"scriptId\":";
++      if (IsScript(shared->script())) out << Cast<Script>(shared->script())->id(); else out << "null";
++      out << '}';
++    }
++    out << ']';
++  });
++}
++void BrowserException(v8::Isolate* api_isolate, v8::Local<v8::Value> value,
++                             v8::Local<v8::String> message, v8::Local<v8::String> url,
++                             unsigned line, unsigned column, int script_id,
++                             v8::Local<v8::String> stack) {
++  auto* isolate = reinterpret_cast<Isolate*>(api_isolate);
++  BrowserEvent("exception", "disabled-by-default-v8.exception", isolate, [&](std::ostream& out) {
++    out << ",\"kind\":\"exception-thrown\",\"message\":";
++    JsonString(out, *Utils::OpenDirectHandle(*message));
++    out << ",\"url\":"; JsonString(out, *Utils::OpenDirectHandle(*url));
++    out << ",\"lineNumber\":" << line << ",\"columnNumber\":" << column
++        << ",\"scriptId\":" << script_id << ",\"exception\":";
++    if (value.IsEmpty()) out << "{\"type\":\"unobserved\"}";
++    else ObservedValue(out, isolate, *Utils::OpenDirectHandle(*value));
++    out << ",\"stack\":"; JsonString(out, *Utils::OpenDirectHandle(*stack));
++  });
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-call-ledger.h
+@@ -0,0 +1,82 @@
++#ifndef V8_RUNTIME_V8TRACE_CALL_LEDGER_H_
++#define V8_RUNTIME_V8TRACE_CALL_LEDGER_H_
++
++#include <atomic>
++#include <chrono>
++#include <cstdint>
++#include <memory>
++#include <mutex>
++#include <thread>
++#include <utility>
++#include <vector>
++
++namespace v8trace_call_ledger {
++struct Producer {
++  uint64_t epoch, producer_id;
++  int thread_id;
++  std::atomic<uint64_t> writing{0}, attempted{0}, selected{0}, filtered{0}, emitted{0};
++  Producer(uint64_t generation, uint64_t id, int thread) : epoch(generation), producer_id(id), thread_id(thread) {}
++};
++struct Snapshot {
++  uint64_t epoch, producer_id;
++  int thread_id;
++  bool final;
++  uint64_t attempted, selected, filtered, emitted;
++};
++class Ledger {
++ public:
++  std::atomic<uint64_t> epoch{1};
++  std::atomic<bool> accepting{false};
++  std::shared_ptr<Producer> Register(int thread_id) {
++    std::lock_guard<std::mutex> lock(mutex_);
++    auto producer = std::make_shared<Producer>(epoch.load(std::memory_order_relaxed), ++next_producer_, thread_id);
++    producers_.push_back(producer); return producer;
++  }
++  void Start() {
++    std::lock_guard<std::mutex> lock(mutex_);
++    if (accepting.load(std::memory_order_acquire)) return;
++    producers_.clear(); epoch.fetch_add(1, std::memory_order_release);
++    accepting.store(true, std::memory_order_seq_cst);
++  }
++  std::vector<Snapshot> Stop(std::chrono::milliseconds timeout = std::chrono::milliseconds(250)) {
++    accepting.store(false, std::memory_order_seq_cst);
++    std::vector<std::shared_ptr<Producer>> producers;
++    { std::lock_guard<std::mutex> lock(mutex_); producers = producers_; }
++    auto deadline = std::chrono::steady_clock::now() + timeout;
++    while (std::chrono::steady_clock::now() < deadline) {
++      bool idle = true;
++      for (const auto& producer : producers) idle = idle && producer->writing.load(std::memory_order_seq_cst) == 0;
++      if (idle) break;
++      std::this_thread::sleep_for(std::chrono::milliseconds(1));
++    }
++    std::vector<Snapshot> snapshots;
++    for (const auto& producer : producers) {
++      bool final = producer->writing.load(std::memory_order_seq_cst) == 0;
++      snapshots.push_back({producer->epoch, producer->producer_id, producer->thread_id, final,
++          producer->attempted.load(std::memory_order_relaxed), producer->selected.load(std::memory_order_relaxed),
++          producer->filtered.load(std::memory_order_relaxed), producer->emitted.load(std::memory_order_relaxed)});
++    }
++    return snapshots;
++  }
++ private:
++  uint64_t next_producer_ = 0;
++  std::mutex mutex_;
++  std::vector<std::shared_ptr<Producer>> producers_;
++};
++class WriteGuard {
++ public:
++  WriteGuard(Ledger& ledger, std::shared_ptr<Producer> producer) : producer_(std::move(producer)) {
++    // Admission and the stop gate share a total order; the final zero synchronizes counter reads.
++    producer_->writing.fetch_add(1, std::memory_order_seq_cst);
++    active_ = ledger.accepting.load(std::memory_order_seq_cst);
++  }
++  ~WriteGuard() { producer_->writing.fetch_sub(1, std::memory_order_release); }
++  WriteGuard(const WriteGuard&) = delete;
++  WriteGuard& operator=(const WriteGuard&) = delete;
++  explicit operator bool() const { return active_; }
++ private:
++  std::shared_ptr<Producer> producer_;
++  bool active_;
++};
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-call-stats.h
+@@ -0,0 +1,61 @@
++#ifndef V8_RUNTIME_V8TRACE_CALL_STATS_H_
++#define V8_RUNTIME_V8TRACE_CALL_STATS_H_
++
++#include "src/base/platform/platform.h"
++#include "src/runtime/v8trace-call-ledger.h"
++
++namespace v8::internal::v8trace {
++using CallProducerStats = v8trace_call_ledger::Producer;
++inline v8trace_call_ledger::Ledger& CallSession() { static v8trace_call_ledger::Ledger state; return state; }
++inline const std::shared_ptr<CallProducerStats>& SharedCallStats() {
++  auto& session = CallSession();
++  static thread_local std::shared_ptr<CallProducerStats> producer;
++  auto epoch = session.epoch.load(std::memory_order_acquire);
++  if (!producer || producer->epoch != epoch) producer = session.Register(base::OS::GetCurrentThreadId());
++  return producer;
++}
++inline CallProducerStats& CallStats() { return *SharedCallStats(); }
++class CallWriteGuard : public v8trace_call_ledger::WriteGuard {
++ public:
++  CallWriteGuard() : WriteGuard(CallSession(), SharedCallStats()) {}
++};
++struct CallTraceOwner { std::mutex mutex; int64_t instance = -1; };
++inline CallTraceOwner& CallOwner() { static CallTraceOwner owner; return owner; }
++void DetailSessionStart(uint32_t instance) {
++  bool enabled = false;
++  TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), &enabled);
++  if (!v8_flags.trace_jscall_detail || !enabled) return;
++  auto& owner = CallOwner(); std::lock_guard<std::mutex> lock(owner.mutex);
++  if (owner.instance != -1) return;
++  owner.instance = instance; CallSession().Start();
++}
++void EmitCallSessionStop() {
++  for (const auto& producer : CallSession().Stop()) {
++#if defined(V8_USE_PERFETTO)
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), "V8TraceCallStats",
++        [&](perfetto::EventContext context) {
++          context.AddDebugAnnotation("protocol", "v8trace/call-stats/1");
++          context.AddDebugAnnotation("producerThreadId", producer.thread_id);
++          context.AddDebugAnnotation("producerId", std::to_string(producer.producer_id));
++          context.AddDebugAnnotation("epoch", producer.epoch);
++          context.AddDebugAnnotation("final", producer.final);
++          context.AddDebugAnnotation("attemptedCalls", producer.attempted);
++          context.AddDebugAnnotation("selectedCalls", producer.selected);
++          context.AddDebugAnnotation("filteredCalls", producer.filtered);
++          context.AddDebugAnnotation("emittedEvents", producer.emitted);
++        });
++#endif
++  }
++}
++void DetailSessionStop(uint32_t instance) {
++  auto& owner = CallOwner(); std::lock_guard<std::mutex> lock(owner.mutex);
++  if (owner.instance != instance) return;
++  EmitCallSessionStop(); owner.instance = -1;
++}
++void DetailSessionShutdown() {
++  auto& owner = CallOwner(); std::lock_guard<std::mutex> lock(owner.mutex);
++  if (owner.instance == -1) return;
++  EmitCallSessionStop(); owner.instance = -1;
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-causality.h
+@@ -0,0 +1,11 @@
++#ifndef V8_RUNTIME_V8TRACE_CAUSALITY_H_
++#define V8_RUNTIME_V8TRACE_CAUSALITY_H_
++#include <ostream>
++namespace v8::internal { class Isolate; }
++namespace v8::internal::v8trace {
++struct CausalContext {};
++inline CausalContext CausalCurrent(Isolate*) { return {}; }
++inline void CausalJson(std::ostream&, Isolate*, CausalContext) {}
++inline void CausalValueJson(std::ostream& out, Isolate*, CausalContext) { out << "{}"; }
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-closure.h
+@@ -0,0 +1,80 @@
++#ifndef V8_RUNTIME_V8TRACE_CLOSURE_H_
++#define V8_RUNTIME_V8TRACE_CLOSURE_H_
++#include <cstring>
++#include "src/objects/scope-info-inl.h"
++#include "src/runtime/v8trace-object-values.h"
++
++namespace v8::internal::v8trace {
++inline void ClosureNumber(std::ostream& out, double value) {
++  uint64_t bits; std::memcpy(&bits, &value, sizeof(bits));
++  out << "{\"type\":\"number\",\"value\":";
++  if (std::isnan(value)) out << "\"NaN\"";
++  else if (std::isinf(value)) out << (value < 0 ? "\"-Infinity\"" : "\"Infinity\"");
++  else if (value == 0 && std::signbit(value)) out << "\"-0\"";
++  else out << std::setprecision(17) << v8trace_json::Number(value);
++  out << ",\"float64Bits\":\"" << v8trace_json::Hex(bits) << "\"}";
++}
++inline void ClosureValue(std::ostream& out, Isolate* isolate, Tagged<Object> value, ObjectObservation& observer) {
++  if (!IsContextCell(value)) { observer.Write(out, value); return; }
++  auto cell = Cast<ContextCell>(value);
++  out << "{\"type\":\"context-cell\",\"state\":" << static_cast<int>(cell->state()) << ",\"value\":";
++  switch (cell->state()) {
++    case ContextCell::kConst: case ContextCell::kSmi: observer.Write(out, cell->tagged_value()); break;
++    case ContextCell::kInt32: out << "{\"type\":\"number\",\"value\":" << cell->int32_value() << '}'; break;
++    case ContextCell::kFloat64: ClosureNumber(out, cell->float64_value()); break;
++    case ContextCell::kDetached: out << "{\"type\":\"unavailable\",\"reason\":\"detached-context-cell\"}"; break;
++  }
++  out << '}';
++}
++inline void ClosureSnapshot(std::ostream& out, Isolate* isolate, Tagged<JSFunction> function, const char* timing = "current-call-phase") {
++  DisallowGarbageCollection no_gc;
++  ObjectObservationConfig values{v8_flags.trace_closure_depth, v8_flags.trace_closure_nodes, v8_flags.trace_closure_properties};
++  ObjectObservation observer(isolate, values);
++  uint32_t scopes = 0, bindings = 0; bool comma = false, complete = true, dynamic = false;
++  auto context = function->context();
++  out << "{\"protocol\":\"v8trace/closure/1\",\"timing\":\"" << timing << "\",\"scopeBudget\":" << v8_flags.trace_closure_scopes << ",\"bindingBudget\":" << v8_flags.trace_closure_bindings
++      << ",\"gcEpoch\":" << isolate->heap()->gc_count().value()
++      << ",\"valueBudget\":{\"depth\":" << values.depth << ",\"nodes\":" << values.nodes << ",\"properties\":" << values.properties
++      << "},\"valueGraphScope\":\"whole-closure-snapshot\",\"invokesUserCode\":false,\"functionLocalsIncluded\":false,\"scopes\":[";
++  while (!IsNativeContext(context)) {
++    if (scopes >= v8_flags.trace_closure_scopes || bindings >= v8_flags.trace_closure_bindings) { complete = false; break; }
++    if (comma) out << ','; comma = true; ++scopes;
++    auto info = context->scope_info();
++    out << "{\"depth\":" << scopes - 1 << ",\"scopeType\":\"" << ToString(info->scope_type()) << "\",\"address\":"; Pointer(out, context->address());
++    out << ",\"identityScope\":\"address-at-observation\",\"sourceStart\":" << (info->HasPositionInfo() ? info->StartPosition() : -1)
++        << ",\"sourceEnd\":" << (info->HasPositionInfo() ? info->EndPosition() : -1) << ",\"declaredContextLocals\":" << info->ContextLocalCount() << ",\"bindings\":[";
++    bool binding_comma = false;
++    for (auto local : ScopeInfo::IterateLocalNames(info, no_gc)) {
++      if (bindings >= v8_flags.trace_closure_bindings) { complete = false; break; }
++      int index = local->index(), slot = info->ContextHeaderLength() + index;
++      if (binding_comma) out << ','; binding_comma = true; ++bindings;
++      out << "{\"name\":"; Value(out, isolate, local->name()); out << ",\"slot\":" << slot << ",\"mode\":" << static_cast<int>(info->ContextLocalMode(index)) << ",\"initialization\":" << static_cast<int>(info->ContextLocalInitFlag(index)) << ",\"value\":";
++      if (slot < 0 || slot >= context->length()) { out << "{\"type\":\"unavailable\",\"reason\":\"slot-out-of-range\"}"; complete = false; }
++      else ClosureValue(out, isolate, context->elements()[slot].Relaxed_Load(), observer);
++      out << '}';
++    }
++    if (info->HasContextAllocatedFunctionName()) {
++      if (bindings >= v8_flags.trace_closure_bindings) complete = false;
++      else {
++        if (binding_comma) out << ','; ++bindings;
++        int slot = info->FunctionContextSlotIndex();
++        out << "{\"name\":"; Value(out, isolate, info->FunctionName()); out << ",\"role\":\"function-name\",\"mode\":-1,\"slot\":" << slot << ",\"value\":";
++        if (slot < 0 || slot >= context->length()) { out << "{\"type\":\"unavailable\",\"reason\":\"slot-out-of-range\"}"; complete = false; }
++        else ClosureValue(out, isolate, context->elements()[slot].Relaxed_Load(), observer);
++        out << '}';
++      }
++    }
++    bool boundary = context->IsWithContext() || context->IsModuleContext() || context->IsDebugEvaluateContext() || context->has_extension();
++    dynamic = dynamic || boundary;
++    out << "],\"dynamicOrModuleBoundary\":" << (boundary ? "true" : "false");
++    if (context->has_extension()) { out << ",\"extension\":"; observer.Write(out, context->extension()); }
++    out << '}';
++    auto previous = context->unchecked_previous();
++    if (!IsContext(previous)) { complete = false; break; }
++    context = Cast<Context>(previous);
++  }
++  out << "],\"scopesObserved\":" << scopes << ",\"bindingsObserved\":" << bindings << ",\"coverage\":\"" << (complete ? "context-allocated-chain" : "partial-budget-or-layout")
++      << "\",\"dynamicOrModuleBoundary\":" << (dynamic ? "true" : "false") << ",\"nativeGlobalExcluded\":true,\"stackAndElidedBindings\":\"not-materialized\",\"valueCacheAcrossCalls\":false}";
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-detail-filter.h
+@@ -0,0 +1,231 @@
++#ifndef V8_RUNTIME_V8TRACE_DETAIL_FILTER_H_
++#define V8_RUNTIME_V8TRACE_DETAIL_FILTER_H_
++
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <string>
++#include <string_view>
++#include <vector>
++#include "src/execution/frames-inl.h"
++#include "src/heap/heap.h"
++#include "src/objects/js-function-inl.h"
++#include "src/runtime/v8trace-json.h"
++#include "src/runtime/v8trace-function-cache.h"
++
++namespace v8::internal::v8trace {
++enum class NativeKind : uint32_t {
++  kJsBuiltin = 1, kCppBuiltin = 2, kRuntime = 4, kApiOperation = 8,
++  kApiGet = 16, kApiSet = 32, kApiInterceptor = 64
++};
++struct DetailFilterConfig {
++  bool active = false, valid = true, unknown = true, exclude_internal = false;
++  uint32_t kinds = 127;
++  std::string token;
++  std::vector<std::u16string> scripts_include, scripts_exclude;
++  std::vector<std::u16string> functions_include, functions_exclude;
++  std::vector<std::u16string> native_include, native_exclude;
++  std::vector<std::u16string> value_scripts_include, value_scripts_exclude;
++  std::vector<std::u16string> value_functions_include, value_functions_exclude;
++};
++inline bool FilterGlob(std::u16string_view value, std::u16string_view pattern) {
++  size_t v = 0, p = 0, star = std::u16string_view::npos, retry = 0;
++  while (v < value.size()) {
++    if (p < pattern.size() && (pattern[p] == u'?' || pattern[p] == value[v])) { ++p; ++v; }
++    else if (p < pattern.size() && pattern[p] == u'*') { star = p++; retry = v; }
++    else if (star != std::u16string_view::npos) { p = star + 1; v = ++retry; }
++    else return false;
++  }
++  while (p < pattern.size() && pattern[p] == u'*') ++p;
++  return p == pattern.size();
++}
++inline bool FilterAny(std::u16string_view value, const std::vector<std::u16string>& patterns,
++                      bool script = false) {
++  for (const auto& pattern : patterns) {
++    auto candidate = value;
++    if (script && pattern.find(u'/') == std::u16string::npos) {
++      candidate = candidate.substr(0, candidate.find_first_of(u"?#"));
++      auto slash = candidate.find_last_of(u'/');
++      if (slash != std::u16string_view::npos) candidate.remove_prefix(slash + 1);
++    }
++    if (FilterGlob(candidate, pattern)) return true;
++  }
++  return false;
++}
++inline DetailFilterConfig ParseDetailFilter(const char* raw) {
++    DetailFilterConfig result;
++    if (!raw || !*raw) return result;
++    result.active = true; result.token = raw;
++    if (result.token.size() > 65536 ||
++        (!result.token.starts_with("1;") && !result.token.starts_with("2;"))) { result.valid = false; return result; }
++    auto hex = [](char ch) -> int { return ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1; };
++    size_t cursor = 2, rules = 0;
++    while (cursor < result.token.size()) {
++      auto end = result.token.find(';', cursor);
++      if (end == std::string::npos) { result.valid = false; break; }
++      auto item = std::string_view(result.token).substr(cursor, end - cursor); cursor = end + 1;
++      if (item.starts_with("K=")) {
++        if (item.size() < 3) { result.valid = false; break; }
++        result.kinds = 0;
++        for (char ch : item.substr(2)) {
++          if (ch < '0' || ch > '9' || result.kinds > 127) { result.valid = false; break; }
++          result.kinds = result.kinds * 10 + ch - '0';
++        }
++        if (result.kinds > 127) result.valid = false;
++        continue;
++      }
++      if (item == "U=0" || item == "U=1") { result.unknown = item.back() == '1'; continue; }
++      if (item == "X=0" || item == "X=1") { result.exclude_internal = item.back() == '1'; continue; }
++      std::vector<std::u16string>* target = nullptr;
++      if (item.starts_with("S+=")) target = &result.scripts_include;
++      if (item.starts_with("S-=")) target = &result.scripts_exclude;
++      if (item.starts_with("J+=")) target = &result.functions_include;
++      if (item.starts_with("J-=")) target = &result.functions_exclude;
++      if (item.starts_with("N+=")) target = &result.native_include;
++      if (item.starts_with("N-=")) target = &result.native_exclude;
++      if (result.token.starts_with("2;")) {
++        if (item.starts_with("D+=")) target = &result.value_scripts_include;
++        if (item.starts_with("D-=")) target = &result.value_scripts_exclude;
++        if (item.starts_with("F+=")) target = &result.value_functions_include;
++        if (item.starts_with("F-=")) target = &result.value_functions_exclude;
++      }
++      if (!target || item.size() <= 3 || (item.size() - 3) % 4 || ++rules > 128 || item.size() > 8195) { result.valid = false; break; }
++      std::u16string text;
++      for (size_t i = 3; i < item.size(); i += 4) {
++        int a = hex(item[i]), b = hex(item[i + 1]), c = hex(item[i + 2]), d = hex(item[i + 3]);
++        if (a < 0 || b < 0 || c < 0 || d < 0) { result.valid = false; break; }
++        text.push_back(static_cast<char16_t>((a * 16 + b) | ((c * 16 + d) << 8)));
++      }
++      target->push_back(std::move(text));
++    }
++    return result;
++}
++inline const DetailFilterConfig& DetailFilter() {
++  static const auto config = ParseDetailFilter(v8_flags.trace_detail_filter);
++  return config;
++}
++inline std::u16string FilterString(Tagged<String> value) {
++  std::u16string result; result.reserve(value->length());
++  for (int i = 0; i < value->length(); ++i) result.push_back(value->Get(i));
++  return result;
++}
++struct FilterScript { std::u16string url; std::string json; };
++struct FilterSource {
++  bool known = false;
++  int script_id = -1, function_start = -1;
++  std::shared_ptr<const FilterScript> script;
++  std::u16string_view url;
++  std::u16string function;
++  std::string_view url_json = "\"\"";
++  std::string function_json = "\"\"";
++  uint64_t function_id = 0, dictionary_epoch = 0;
++  uint32_t gc_epoch = 0;
++  bool selected = true, source_selected = true, values_selected = true;
++};
++inline bool SourceSelected(const FilterSource& source) {
++  const auto& config = DetailFilter();
++  if (!source.known) return config.unknown;
++  if (config.exclude_internal && (source.url.starts_with(u"v8trace:") || source.url.starts_with(u"chrome:") ||
++      source.url.starts_with(u"chrome-untrusted:") || source.url.starts_with(u"devtools:") ||
++      source.url.starts_with(u"chrome-extension:") || source.url.starts_with(u"extensions::") || source.url.starts_with(u"v8/"))) return false;
++  return !FilterAny(source.url, config.scripts_exclude, true) &&
++      (config.scripts_include.empty() || FilterAny(source.url, config.scripts_include, true));
++}
++inline FilterSource& FunctionSource(Isolate* isolate, Tagged<JSFunction> function) {
++  auto shared = function->shared();
++  auto name = shared->Name();
++  auto script = shared->script();
++  int script_id = IsScript(script) ? Cast<Script>(script)->id() : -1;
++  Tagged<Object> url = IsScript(script) ? Cast<Script>(script)->GetNameOrSourceURL() : Tagged<Object>();
++  // Address stamps alone have an ABA hazard when a collected name's address is reused.
++  v8trace_cache::FunctionKey key{static_cast<uint64_t>(isolate->debug()->IsolateId()), shared->unique_id(), script_id, isolate->heap()->gc_count().value()};
++  static thread_local v8trace_cache::FunctionCache<FilterSource, 8192> functions;
++  static thread_local uint64_t next_id = 0;
++  if (auto* found = functions.Find(key, name.ptr(), url.ptr())) return *found;
++  FilterSource result;
++  result.function_id = ++next_id;
++  result.gc_epoch = key.gc_epoch;
++  result.function_start = shared->StartPosition(); result.script_id = script_id;
++  result.function = FilterString(name);
++  result.function_json = v8trace_json::EncodeUtf16(result.function);
++  if (IsString(url)) {
++    static thread_local v8trace_cache::FunctionCache<std::shared_ptr<const FilterScript>, 1024> scripts;
++    v8trace_cache::FunctionKey script_key{key.isolate, script_id, -1, key.gc_epoch};
++    auto* found = scripts.Find(script_key, url.ptr(), 0);
++    if (!found) {
++      auto text = FilterString(Cast<String>(url));
++      auto json = v8trace_json::EncodeUtf16(text);
++      found = &scripts.Put(script_key, url.ptr(), 0, std::make_shared<FilterScript>(FilterScript{std::move(text), std::move(json)}));
++    }
++    result.script = *found;
++    result.url = result.script->url;
++    result.url_json = result.script->json;
++    result.known = !result.url.empty();
++  }
++  const auto& config = DetailFilter();
++  result.source_selected = !config.active || (config.valid && SourceSelected(result));
++  result.selected = result.source_selected &&
++      !FilterAny(result.function, config.functions_exclude) &&
++      (config.functions_include.empty() || FilterAny(result.function, config.functions_include));
++  result.values_selected = !config.active || (config.valid &&
++      !FilterAny(result.url, config.value_scripts_exclude, true) &&
++      (config.value_scripts_include.empty() || FilterAny(result.url, config.value_scripts_include, true)) &&
++      !FilterAny(result.function, config.value_functions_exclude) &&
++      (config.value_functions_include.empty() || FilterAny(result.function, config.value_functions_include)));
++  return functions.Put(key, name.ptr(), url.ptr(), std::move(result));
++}
++inline const FilterSource& CurrentSource(Isolate* isolate) {
++  static const FilterSource unknown;
++  JavaScriptStackFrameIterator it(isolate);
++  return it.done() ? unknown : FunctionSource(isolate, it.frame()->function());
++}
++struct FilterCounters { uint64_t accepted[2] = {}, rejected[2] = {}, unknown[2] = {}; bool emitted = false; };
++inline FilterCounters& DetailFilterCounters() { static thread_local FilterCounters counters; return counters; }
++inline void FilterStatus(bool force = false) {
++  auto& counts = DetailFilterCounters(); const auto& config = DetailFilter();
++  if (!config.active) return;
++  uint64_t total = counts.accepted[0] + counts.accepted[1] + counts.rejected[0] + counts.rejected[1];
++  if (!force && counts.emitted && total % 256 != 0) return;
++  auto write = [&](auto& context) {
++    std::ostringstream out;
++    out << "{\"protocol\":\"v8trace/detail-filter/1\",\"valid\":" << (config.valid ? "true" : "false")
++        << ",\"token\":\"" << config.token << "\",\"countsLowerBound\":true,\"jscallAccepted\":" << counts.accepted[0]
++        << ",\"jscallFiltered\":" << counts.rejected[0] << ",\"nativeAccepted\":" << counts.accepted[1]
++        << ",\"nativeFiltered\":" << counts.rejected[1] << ",\"unknownSource\":" << counts.unknown[0] + counts.unknown[1] << '}';
++    context.AddDebugAnnotation("record", out.str()); counts.emitted = true;
++  };
++#if defined(V8_USE_PERFETTO)
++  if (v8_flags.trace_jscall_detail) TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), "V8TraceFilter", [&](perfetto::EventContext context) { write(context); });
++  else TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.native"), "V8TraceFilter", [&](perfetto::EventContext context) { write(context); });
++#endif
++}
++inline bool FilterDecision(bool selected, int channel, bool known) {
++  auto& counts = DetailFilterCounters();
++  (selected ? counts.accepted[channel] : counts.rejected[channel])++;
++  if (!known) counts.unknown[channel]++;
++  FilterStatus(); return selected;
++}
++inline bool JsSelected(Isolate* isolate, Tagged<JSFunction> function) {
++  const auto& config = DetailFilter(); if (!config.active) return true;
++  const auto& source = FunctionSource(isolate, function);
++  return FilterDecision(source.selected, 0, source.known);
++}
++inline bool NativeSelected(Isolate* isolate, NativeKind kind, std::u16string_view name) {
++  const auto& config = DetailFilter(); if (!config.active) return true;
++  const auto& source = CurrentSource(isolate);
++  return FilterDecision(config.valid && (config.kinds & static_cast<uint32_t>(kind)) && (source.function_id ? source.source_selected : SourceSelected(source)) &&
++      !FilterAny(name, config.native_exclude) && (config.native_include.empty() || FilterAny(name, config.native_include)), 1, source.known);
++}
++inline NativeKind ApiKind(v8::ExceptionContext type) {
++  if (type == v8::ExceptionContext::kOperation || type == v8::ExceptionContext::kConstructor) return NativeKind::kApiOperation;
++  if (type == v8::ExceptionContext::kAttributeGet) return NativeKind::kApiGet;
++  if (type == v8::ExceptionContext::kAttributeSet) return NativeKind::kApiSet;
++  return NativeKind::kApiInterceptor;
++}
++inline void FilterSourceJson(std::ostream& out, const FilterSource& source) {
++  if (!DetailFilter().active) return;
++  out << ",\"source\":{\"scriptId\":" << source.script_id << ",\"functionStart\":" << source.function_start
++      << ",\"known\":" << (source.known ? "true" : "false") << ",\"url\":" << source.url_json << '}';
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-detail-inl.h
+@@ -0,0 +1,521 @@
++#ifndef V8_RUNTIME_V8TRACE_DETAIL_INL_H_
++#define V8_RUNTIME_V8TRACE_DETAIL_INL_H_
++
++#include <cstring>
++#include <optional>
++#include <unordered_map>
++#include <unordered_set>
++#include "src/api/api-inl.h"
++#include "src/api/api-arguments.h"
++#include "src/execution/frames-inl.h"
++#include "src/objects/js-function-inl.h"
++#include "src/objects/js-proxy-inl.h"
++#include "src/runtime/v8trace-detail.h"
++#include "src/runtime/v8trace-object-values.h"
++#include "src/runtime/v8trace-detail-filter.h"
++#include "src/runtime/v8trace-call-stats.h"
++#include "src/runtime/v8trace-closure.h"
++
++namespace v8::internal::v8trace {
++namespace {
++thread_local uint64_t detail_sequences[3] = {};
++thread_local uint64_t detail_calls = 0;
++thread_local std::unordered_set<Isolate*> reconcile_needed;
++struct ActiveCall { uint64_t id; std::string exception; bool resumed = false; bool values = true; int function_unique_id = -1; std::string closure_at_throw; CausalContext causal; };
++thread_local std::unordered_map<Isolate*, std::unordered_map<Address, ActiveCall>> js_calls;
++struct NativeSite { uint64_t id; int instruction; int successor; std::string exception; CausalContext causal; };
++thread_local std::unordered_map<Isolate*, std::unordered_map<Address, NativeSite>> native_sites;
++
++void Ascii(std::ostream& out, const char* value) {
++  out << '"';
++  for (const unsigned char* ch = reinterpret_cast<const unsigned char*>(value); *ch; ++ch) {
++    if (*ch == '"' || *ch == '\\') out << '\\' << static_cast<char>(*ch);
++    else if (*ch >= 32 && *ch < 127) out << static_cast<char>(*ch);
++    else out << "\\u" << std::hex << std::setw(4) << std::setfill('0')
++             << static_cast<unsigned>(*ch) << std::dec << std::setfill(' ');
++  }
++  out << '"';
++}
++void Reconcile(Isolate* isolate) {
++  reconcile_needed.erase(isolate);
++  auto& calls = js_calls[isolate];
++  auto& sites = native_sites[isolate];
++  if (calls.empty() && sites.empty()) return;
++  std::unordered_set<Address> alive;
++  for (JavaScriptStackFrameIterator it(isolate); !it.done(); it.Advance()) alive.insert(it.frame()->fp());
++  for (auto it = calls.begin(); it != calls.end();) {
++    if (alive.contains(it->first)) { ++it; continue; }
++    ActiveCall call = it->second;
++    DetailEvent(isolate, "jscall", [&](std::ostream& out) {
++      out << ",\"phase\":\"throw\",\"callId\":\"" << call.id
++          << "\",\"completionSource\":\"native-frame-unwind\",\"exception\":"
++          << (call.exception.empty() ? "{\"type\":\"unobserved\"}" : call.exception);
++      if (!call.closure_at_throw.empty()) out << ",\"closure\":" << call.closure_at_throw;
++    },call.causal);
++    it = calls.erase(it);
++  }
++  for (auto it = sites.begin(); it != sites.end();) {
++    if (alive.contains(it->first)) { ++it; continue; }
++    NativeSite call = it->second;
++    if (call.id) DetailEvent(isolate, "native", [&](std::ostream& out) {
++      out << ",\"phase\":\"throw\",\"callId\":\"" << call.id
++          << "\",\"completionSource\":\"native-frame-unwind\",\"exception\":"
++          << (call.exception.empty() ? "{\"type\":\"unobserved\"}" : call.exception);
++    },call.causal);
++    it = sites.erase(it);
++  }
++}
++}
++
++void DetailEvent(Isolate* isolate, const char* kind,
++                 const std::function<void(std::ostream&)>& body,
++                 std::optional<CausalContext> causal) {
++  auto write = [&](auto& context, int index) {
++    std::optional<CallWriteGuard> guard;
++    // Nested unwind records finish inside the already admitted, thread-local operation.
++    if (index == 0 && CallStats().writing.load(std::memory_order_relaxed) == 0) { guard.emplace(); if (!*guard) return; }
++    DisallowGarbageCollection no_gc;
++    std::ostringstream out;
++    out.imbue(std::locale::classic());
++    out << "{\"schema\":\"v8trace/detail/1\",\"channel\":\"" << kind
++        << "\",\"producerSeq\":" << ++detail_sequences[index]
++        << ",\"isolateId\":\"" << std::hex << isolate->debug()->IsolateId()
++        << std::dec << "\",\"contextId\":";
++    if (!isolate->context().is_null()) {
++      auto id = isolate->context()->native_context()->debug_context_id();
++      if (IsSmi(id)) out << Cast<Smi>(id).value(); else out << "null";
++    } else out << "null";
++    if (detail_sequences[index] == 1) {
++      out << ",\"objectObservation\":"; ObservationConfigJson(out);
++    }
++    if (index == 0) out << ",\"producerId\":\"" << CallStats().producer_id << '"';
++    CausalJson(out,isolate,causal.value_or(CausalCurrent(isolate)));
++    body(out);
++    out << '}';
++    context.AddDebugAnnotation("record", out.str());
++    if (index == 0) CallStats().emitted.fetch_add(1, std::memory_order_relaxed);
++  };
++#if defined(V8_USE_PERFETTO)
++  if (std::strcmp(kind, "jscall") == 0) {
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), "V8TraceDetail",
++                       [&](perfetto::EventContext context) { write(context, 0); });
++  } else if (std::strcmp(kind, "native") == 0) {
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.native"), "V8TraceDetail",
++                       [&](perfetto::EventContext context) { write(context, 1); });
++  } else {
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.wasm"), "V8TraceDetail",
++                       [&](perfetto::EventContext context) { write(context, 2); });
++  }
++#endif
++}
++
++void DetailValue(std::ostream& out, Isolate* isolate, Tagged<Object> value) {
++  ObservedValue(out, isolate, value);
++}
++
++bool JsTracingEnabled() {
++  bool enabled = false;
++  TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), &enabled);
++  if (!enabled || !CallSession().accepting.load(std::memory_order_acquire)) return false;
++  static thread_local uint64_t epoch = 0;
++  auto current = CallSession().epoch.load(std::memory_order_acquire);
++  if (epoch != current) { epoch = current; detail_sequences[0] = 0; js_calls.clear(); }
++  return true;
++}
++
++std::string CallHex(uint64_t value) {
++  char buffer[16];
++  auto converted = std::to_chars(buffer, buffer + sizeof(buffer), value, 16);
++  return std::string(buffer, converted.ptr);
++}
++
++template <typename Payload>
++void CallEvent(Isolate* isolate, Tagged<JSFunction> function, Address frame,
++               const char* phase, uint64_t id, bool values, uint32_t argc,
++               Payload&& payload) {
++#if defined(V8_USE_PERFETTO)
++  DisallowGarbageCollection no_gc;
++  auto& source = FunctionSource(isolate, function);
++  auto epoch = CallStats().epoch;
++  if (source.dictionary_epoch != epoch) {
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), "V8TraceFunction",
++        [&](perfetto::EventContext context) {
++          std::ostringstream out;
++          out.imbue(std::locale::classic());
++          out << "{\"functionName\":" << source.function_json
++              << ",\"functionStart\":" << source.function_start
++              << ",\"gcEpoch\":" << source.gc_epoch
++              << ",\"scriptId\":" << source.script_id << ",\"source\":{\"known\":"
++              << (source.known ? "true" : "false") << ",\"scriptId\":" << source.script_id
++              << ",\"functionStart\":" << source.function_start << ",\"url\":" << source.url_json << "},\"functionValue\":";
++          DetailValue(out, isolate, function); out << '}';
++          context.AddDebugAnnotation("protocol", "v8trace/function/1");
++          context.AddDebugAnnotation("functionId", std::to_string(source.function_id));
++          context.AddDebugAnnotation("producerId", std::to_string(CallStats().producer_id));
++          context.AddDebugAnnotation("isolateId", CallHex(isolate->debug()->IsolateId()));
++          context.AddDebugAnnotation("metadata", out.str());
++          source.dictionary_epoch = epoch;
++        });
++  }
++  TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.jscall"), "V8TraceCall",
++      [&](perfetto::EventContext context) {
++        DisallowGarbageCollection no_gc;
++        context.AddDebugAnnotation("protocol", "v8trace/call/2");
++        context.AddDebugAnnotation("phase", phase);
++        context.AddDebugAnnotation("callId", std::to_string(id));
++        context.AddDebugAnnotation("functionId", std::to_string(source.function_id));
++        context.AddDebugAnnotation("frameAddress", CallHex(frame));
++        context.AddDebugAnnotation("functionAddress", CallHex(function->address()));
++        context.AddDebugAnnotation("functionInstanceType", static_cast<unsigned>(function->map()->instance_type()));
++        context.AddDebugAnnotation("argc", argc);
++        if (false) {
++          auto found=js_calls[isolate].find(frame);
++          auto causal=found==js_calls[isolate].end()?CausalCurrent(isolate):found->second.causal;
++          std::ostringstream json;CausalValueJson(json,isolate,causal);
++          context.AddDebugAnnotation("causal",json.str());
++        }
++        if (std::strcmp(phase, "entry") == 0 || std::strcmp(phase, "resume") == 0) {
++          JavaScriptStackFrameIterator parent(isolate);
++          bool current = !parent.done() && parent.frame()->fp() == frame;
++          if (current) parent.Advance();
++          bool exact = current && parent.done();
++          if (current && !parent.done()) {
++            auto& calls = js_calls[isolate]; auto found = calls.find(parent.frame()->fp());
++            if (found != calls.end()) { context.AddDebugAnnotation("parentCallId", std::to_string(found->second.id)); exact = true; }
++          }
++          context.AddDebugAnnotation("parentExact", exact);
++        }
++        context.AddDebugAnnotation("isolateId", CallHex(isolate->debug()->IsolateId()));
++        context.AddDebugAnnotation("producerSeq", ++detail_sequences[0]);
++        context.AddDebugAnnotation("producerId", std::to_string(CallStats().producer_id));
++        if (!isolate->context().is_null()) {
++          auto context_id = isolate->context()->native_context()->debug_context_id();
++          if (IsSmi(context_id)) context.AddDebugAnnotation("contextId", Cast<Smi>(context_id).value());
++        }
++        context.AddDebugAnnotation("valuesCaptured", values);
++        if (std::strcmp(phase, "resume") == 0 || std::strcmp(phase, "suspend") == 0)
++          context.AddDebugAnnotation("boundary", "generator-activation-segment");
++        if (detail_sequences[0] == 1) {
++          std::ostringstream out; ObservationConfigJson(out);
++          context.AddDebugAnnotation("objectObservation", out.str());
++        }
++        if (values) {
++          std::ostringstream out; out.imbue(std::locale::classic()); out << '{';
++          payload(out); out << '}';
++          context.AddDebugAnnotation("values", out.str());
++        }
++        if (v8_flags.trace_jscall_closure) {
++          std::ostringstream out; out.imbue(std::locale::classic()); ClosureSnapshot(out, isolate, function);
++          context.AddDebugAnnotation("closure", out.str());
++        }
++        CallStats().emitted.fetch_add(1, std::memory_order_relaxed);
++      });
++#endif
++}
++
++void JsCall(Isolate* isolate, bool entry, Tagged<Object> result) {
++  if (!v8_flags.trace_jscall_detail || !JsTracingEnabled()) return;
++  CallWriteGuard guard; if (!guard) return;
++  if (reconcile_needed.contains(isolate)) Reconcile(isolate);
++  JavaScriptStackFrameIterator it(isolate);
++  if (it.done()) return;
++  auto frame = it.frame();
++  auto& calls = js_calls[isolate];
++  bool activating = entry && calls.contains(frame->fp()) && calls.at(frame->fp()).resumed &&
++      calls.at(frame->fp()).exception.empty() && calls.at(frame->fp()).function_unique_id == frame->function()->shared()->unique_id();
++  if (!entry && !calls.contains(frame->fp())) return;
++  if (entry && calls.contains(frame->fp()) && !activating) {
++    auto previous = calls.at(frame->fp());
++    DetailEvent(isolate, "jscall", [&](std::ostream& out) {
++      out << ",\"phase\":\"throw\",\"callId\":\"" << previous.id
++          << "\",\"completionSource\":\"frame-reused-after-unwind\",\"exception\":"
++          << (previous.exception.empty() ? "{\"type\":\"unobserved\"}" : previous.exception);
++      if (!previous.closure_at_throw.empty()) out << ",\"closure\":" << previous.closure_at_throw;
++    },previous.causal);
++    calls.erase(frame->fp());
++  }
++  if (entry && !activating) {
++    auto& stats = CallStats(); stats.attempted.fetch_add(1, std::memory_order_relaxed);
++    if (!JsSelected(isolate, frame->function())) { stats.filtered.fetch_add(1, std::memory_order_relaxed); return; }
++    stats.selected.fetch_add(1, std::memory_order_relaxed);
++  }
++  bool values = entry && !activating ? v8_flags.trace_jscall_values && FunctionSource(isolate, frame->function()).values_selected : calls.at(frame->fp()).values;
++  uint64_t id = entry && !activating ? ++detail_calls : calls.at(frame->fp()).id;
++  if (entry && !activating) calls[frame->fp()] = {id, {}, false, values, frame->function()->shared()->unique_id(), {}, CausalCurrent(isolate)};
++  if (activating) calls[frame->fp()].resumed = false;
++  CallEvent(isolate, frame->function(), frame->fp(), activating ? "argument" : entry ? "entry" : "return", id, values, frame->GetActualArgumentCount(), [&](std::ostream& out) {
++    if (entry) {
++      out << "\"receiver\":"; DetailValue(out, isolate, frame->receiver());
++      out << ",\"arguments\":[";
++      uint32_t count = frame->GetActualArgumentCount();
++      for (uint32_t i = 0; i < count; ++i) { if (i) out << ','; DetailValue(out, isolate, frame->GetParameter(i)); }
++      out << ']';
++    } else { out << "\"result\":"; DetailValue(out, isolate, result); }
++  });
++  if (!entry) calls.erase(frame->fp());
++}
++
++void JsInstruction(Isolate* isolate, UnoptimizedJSFrame* frame,
++                    interpreter::BytecodeArrayIterator& iterator,
++                    int offset, Tagged<Object> accumulator) {
++  if (!v8_flags.trace_jscall_detail || !JsTracingEnabled()) return;
++  CallWriteGuard guard; if (!guard) return;
++  if (iterator.current_operand_scale() != interpreter::OperandScale::kSingle &&
++      offset == iterator.current_offset()) return;
++  auto opcode = iterator.current_bytecode();
++  bool suspend = opcode == interpreter::Bytecode::kSuspendGenerator;
++  bool resume = opcode == interpreter::Bytecode::kResumeGenerator;
++  if (!suspend && !resume) return;
++  if (resume) {
++    auto& stats = CallStats(); stats.attempted.fetch_add(1, std::memory_order_relaxed);
++    if (!JsSelected(isolate, frame->function())) { stats.filtered.fetch_add(1, std::memory_order_relaxed); return; }
++    stats.selected.fetch_add(1, std::memory_order_relaxed);
++  }
++  auto& calls = js_calls[isolate];
++  if (suspend && !calls.contains(frame->fp())) return;
++  uint64_t id = suspend ? calls.at(frame->fp()).id : ++detail_calls;
++  bool values = suspend ? calls.at(frame->fp()).values : v8_flags.trace_jscall_values && FunctionSource(isolate, frame->function()).values_selected;
++  if (resume) calls[frame->fp()] = {id, {}, true, values, frame->function()->shared()->unique_id(), {}, CausalCurrent(isolate)};
++  CallEvent(isolate, frame->function(), frame->fp(), suspend ? "suspend" : "resume", id, values, frame->GetActualArgumentCount(), [&](std::ostream& out) {
++    out << "\"boundary\":\"generator-activation-segment\",\"generator\":";
++    DetailValue(out, isolate, frame->ReadInterpreterRegister(iterator.GetRegisterOperand(0).index()));
++    out << ",\"accumulator\":"; DetailValue(out, isolate, accumulator);
++  });
++  if (suspend) calls.erase(frame->fp());
++}
++
++void JsException(Isolate* isolate, Tagged<Object> exception) {
++  if (!v8_flags.trace_jscall_detail && !v8_flags.trace_native_detail) return;
++  bool capture = v8_flags.trace_native_detail;
++  for (const auto& item : js_calls[isolate]) capture = capture || item.second.values;
++  DisallowGarbageCollection no_gc;
++  std::ostringstream out;
++  out.imbue(std::locale::classic());
++  if (capture) DetailValue(out, isolate, exception);
++  else out << "{\"type\":\"not-captured\",\"reason\":\"call-structure-only\"}";
++  reconcile_needed.insert(isolate);
++  for (auto& item : js_calls[isolate]) item.second.exception = item.second.values ? out.str() : "{\"type\":\"not-captured\",\"reason\":\"call-structure-only\"}";
++  if (v8_flags.trace_jscall_closure && JsTracingEnabled()) {
++    CallWriteGuard guard;
++    if (guard) for (JavaScriptStackFrameIterator frame(isolate); !frame.done(); frame.Advance()) {
++      auto found = js_calls[isolate].find(frame.frame()->fp());
++      if (found == js_calls[isolate].end()) continue;
++      std::ostringstream lexical; lexical.imbue(std::locale::classic());
++      ClosureSnapshot(lexical, isolate, frame.frame()->function(), "throw-observation-before-unwind");
++      found->second.closure_at_throw = lexical.str();
++    }
++  }
++  for (auto& item : native_sites[isolate]) item.second.exception = out.str();
++}
++
++void NativeCallsite(Isolate* isolate, UnoptimizedJSFrame* frame,
++                    interpreter::BytecodeArrayIterator& iterator,
++                    int dispatch_offset, Tagged<Object> accumulator) {
++  if (!v8_flags.trace_native_detail) return;
++  if (reconcile_needed.contains(isolate)) Reconcile(isolate);
++  auto& pending = native_sites[isolate];
++  auto current = pending.find(frame->fp());
++  if (current != pending.end() && iterator.current_offset() != current->second.instruction) {
++    auto call = current->second;
++    bool returned = iterator.current_offset() == call.successor;
++    if (call.id) DetailEvent(isolate, "native", [&](std::ostream& out) {
++      out << ",\"phase\":\"" << (returned ? "return" : "throw")
++          << "\",\"callId\":\"" << call.id
++          << "\",\"completionSource\":\"ignition-successor\",";
++      if (returned) { out << "\"result\":"; DetailValue(out, isolate, accumulator); }
++      else out << "\"exception\":" << (call.exception.empty() ? "{\"type\":\"unobserved\"}" : call.exception);
++    },call.causal);
++    pending.erase(current);
++  }
++  if (iterator.current_operand_scale() != interpreter::OperandScale::kSingle &&
++      dispatch_offset == iterator.current_offset()) return;
++  const char* opcode = interpreter::Bytecodes::ToString(iterator.current_bytecode());
++  if (std::strncmp(opcode, "Call", 4) != 0 && std::strncmp(opcode, "Construct", 9) != 0) return;
++  auto type = interpreter::Bytecodes::GetOperandType(iterator.current_bytecode(), 0);
++  if (!interpreter::Bytecodes::IsRegisterInputOperandType(type)) return;
++  Tagged<Object> target = frame->ReadInterpreterRegister(iterator.GetRegisterOperand(0).index());
++  while (IsJSBoundFunction(target) || IsJSProxy(target)) {
++    target = IsJSBoundFunction(target) ? Cast<JSBoundFunction>(target)->bound_target_function()
++                                     : Cast<JSProxy>(target)->target();
++  }
++  if (!IsJSFunction(target)) return;
++  auto shared = Cast<JSFunction>(target)->shared();
++  if (!shared->IsApiFunction() && !shared->HasBuiltinId()) return;
++  pending[frame->fp()] = {0, iterator.current_offset(), iterator.current_offset() + iterator.current_bytecode_size(), {}, CausalCurrent(isolate)};
++}
++
++void NativeCallsiteComplete(Isolate* isolate, UnoptimizedJSFrame* frame,
++                            int offset, Tagged<Object> result) {
++  if (!v8_flags.trace_native_detail) return;
++  auto& pending = native_sites[isolate];
++  auto found = pending.find(frame->fp());
++  if (found == pending.end() || found->second.instruction != offset) return;
++  auto call = found->second;
++  if (call.id) DetailEvent(isolate, "native", [&](std::ostream& out) {
++    out << ",\"phase\":\"return\",\"callId\":\"" << call.id
++        << "\",\"completionSource\":\"ignition-call-exit\",\"result\":";
++    DetailValue(out, isolate, result);
++  },call.causal);
++  pending.erase(found);
++}
++
++void NativeJsEntry(Isolate* isolate, Address raw_target, intptr_t argc,
++                   Address* argv, Address frame, Address new_target,
++                   intptr_t construct) {
++  if (construct == 2) {
++    if (!v8_flags.trace_native_detail) return;
++    auto& pending = native_sites[isolate];
++    auto found = pending.find(frame);
++    if (found == pending.end()) return;
++    auto call = found->second;
++    if (call.id) DetailEvent(isolate, "native", [&](std::ostream& out) {
++      out << ",\"phase\":\"return\",\"callId\":\"" << call.id
++          << "\",\"completionSource\":\"interpreter-return-trampoline\",\"result\":";
++      DetailValue(out, isolate, Tagged<Object>(raw_target));
++    },call.causal);
++    pending.erase(found);
++    return;
++  }
++  if (!v8_flags.trace_native_detail || argc < 1) return;
++  Tagged<Object> target(raw_target);
++  if (!IsJSFunction(target)) return;
++  auto shared = Cast<JSFunction>(target)->shared();
++  if (!shared->IsApiFunction() && !shared->HasBuiltinId()) return;
++  auto& pending = native_sites[isolate];
++  auto current = pending.find(frame);
++  if (current == pending.end() || current->second.id) return;
++  if (DetailFilter().active && !NativeSelected(isolate, shared->IsApiFunction() ? NativeKind::kApiOperation : NativeKind::kJsBuiltin,
++                       FunctionSource(isolate, Cast<JSFunction>(target)).function)) return;
++  DetailEvent(isolate, "native", [&](std::ostream& out) {
++    uint64_t id = ++detail_calls;
++    current->second.id = id;
++    out << ",\"phase\":\"entry\",\"callId\":\"" << id
++        << "\",\"boundary\":\"x64-js-native-entry\",\"argumentsComplete\":true,\"name\":";
++    JsonString(out, shared->Name());
++    if (DetailFilter().active) FilterSourceJson(out, CurrentSource(isolate));
++    out << ",\"target\":"; DetailValue(out, isolate, target);
++    out << ",\"receiver\":"; DetailValue(out, isolate, Tagged<Object>(argv[0]));
++    if (construct) { out << ",\"newTarget\":"; DetailValue(out, isolate, Tagged<Object>(new_target)); }
++    out << ",\"arguments\":[";
++    for (intptr_t i = 1; i < argc; ++i) { if (i > 1) out << ','; DetailValue(out, isolate, Tagged<Object>(argv[i])); }
++    out << ']';
++  });
++}
++
++uint64_t NativeCallbackEnter(Isolate* isolate, Address address,
++                            v8::ExceptionContext type, const void* raw) {
++  if (!v8_flags.trace_native_detail || !raw) return 0;
++  if (DetailFilter().active) {
++  std::u16string filter_name;
++  if (type == v8::ExceptionContext::kOperation || type == v8::ExceptionContext::kConstructor) {
++    auto target = FunctionCallbackArguments::GetTarget(*static_cast<const v8::FunctionCallbackInfo<v8::Value>*>(raw));
++    if (!OutsideObjectCage(isolate, target) && IsJSFunction(target)) filter_name = FilterString(Cast<JSFunction>(target)->shared()->Name());
++  } else if (type != v8::ExceptionContext::kNamedEnumerator) {
++    const auto& info = *static_cast<const v8::PropertyCallbackInfo<v8::Value>*>(raw);
++    if (PropertyCallbackArguments::IsNamed(info)) {
++      auto property = *PropertyCallbackArguments::GetPropertyName(info);
++      if (IsString(property)) filter_name = FilterString(Cast<String>(property));
++    }
++  }
++  if (!NativeSelected(isolate, ApiKind(type), filter_name)) return 0;
++  }
++  uint64_t id = 0;
++  DetailEvent(isolate, "native", [&](std::ostream& out) {
++    id = ++detail_calls;
++    out << ",\"phase\":\"entry\",\"callId\":\"" << id
++        << "\",\"boundary\":\"v8-api-callback\",\"callbackAddress\":";
++    Pointer(out, address);
++    out << ",\"exceptionContext\":" << static_cast<int>(type);
++    if (DetailFilter().active) FilterSourceJson(out, CurrentSource(isolate));
++    if (type == v8::ExceptionContext::kOperation || type == v8::ExceptionContext::kConstructor) {
++      const auto& info = *static_cast<const v8::FunctionCallbackInfo<v8::Value>*>(raw);
++      out << ",\"target\":"; DetailValue(out, isolate, FunctionCallbackArguments::GetTarget(info));
++      out << ",\"receiver\":"; DetailValue(out, isolate, *Utils::OpenDirectHandle(*info.This()));
++      out << ",\"newTarget\":"; DetailValue(out, isolate, *Utils::OpenDirectHandle(*info.NewTarget()));
++      out << ",\"arguments\":[";
++      for (int i = 0; i < info.Length(); ++i) { if (i) out << ','; DetailValue(out, isolate, *Utils::OpenDirectHandle(*info[i])); }
++      out << ']';
++    } else {
++      const auto& info = *static_cast<const v8::PropertyCallbackInfo<v8::Value>*>(raw);
++      out << ",\"receiver\":"; DetailValue(out, isolate, *Utils::OpenDirectHandle(*info.Holder()));
++      if (type != v8::ExceptionContext::kNamedEnumerator) {
++        out << ",\"property\":";
++        if (PropertyCallbackArguments::IsNamed(info)) DetailValue(out, isolate, *PropertyCallbackArguments::GetPropertyName(info));
++        else out << "{\"type\":\"number\",\"value\":" << PropertyCallbackArguments::GetPropertyIndex(info) << '}';
++      }
++    }
++  });
++  return id;
++}
++
++void NativeCallbackExit(Isolate* isolate, uint64_t id,
++                       v8::ExceptionContext type, const void* raw) {
++  if (!id) return;
++  DetailEvent(isolate, "native", [&](std::ostream& out) {
++    out << ",\"phase\":\"" << (isolate->has_exception() ? "throw" : "return")
++        << "\",\"callId\":\"" << id << "\",";
++    if (isolate->has_exception()) { out << "\"exception\":"; DetailValue(out, isolate, isolate->exception()); }
++    else {
++      out << "\"result\":";
++      if (type == v8::ExceptionContext::kOperation || type == v8::ExceptionContext::kConstructor)
++        DetailValue(out, isolate, *Utils::OpenDirectHandle(*static_cast<const v8::FunctionCallbackInfo<v8::Value>*>(raw)->GetReturnValue().Get()));
++      else DetailValue(out, isolate, *Utils::OpenDirectHandle(*static_cast<const v8::PropertyCallbackInfo<v8::Value>*>(raw)->GetReturnValue().Get()));
++    }
++  });
++}
++
++void NativeExtra(Isolate* isolate, uint64_t id, const char* name, Tagged<Object> value) {
++  if (!id) return;
++  DetailEvent(isolate, "native", [&](std::ostream& out) {
++    out << ",\"phase\":\"argument\",\"callId\":\"" << id << "\",\"name\":";
++    Ascii(out, name); out << ",\"value\":"; DetailValue(out, isolate, value);
++  });
++}
++
++void NativeDescriptor(Isolate* isolate, uint64_t id, const v8::PropertyDescriptor& desc) {
++  if (!id) return;
++  if (desc.has_value()) NativeExtra(isolate, id, "descriptor.value", *Utils::OpenDirectHandle(*desc.value()));
++  if (desc.has_get()) NativeExtra(isolate, id, "descriptor.get", *Utils::OpenDirectHandle(*desc.get()));
++  if (desc.has_set()) NativeExtra(isolate, id, "descriptor.set", *Utils::OpenDirectHandle(*desc.set()));
++  if (desc.has_writable()) NativeExtra(isolate, id, "descriptor.writable", isolate->heap()->ToBoolean(desc.writable()));
++  if (desc.has_enumerable()) NativeExtra(isolate, id, "descriptor.enumerable", isolate->heap()->ToBoolean(desc.enumerable()));
++  if (desc.has_configurable()) NativeExtra(isolate, id, "descriptor.configurable", isolate->heap()->ToBoolean(desc.configurable()));
++}
++
++uint64_t NativeArgumentsEnter(Isolate* isolate, const char* name, int count,
++                              const std::function<Tagged<Object>(int)>& argument,
++                              bool receiver) {
++  if (!v8_flags.trace_native_detail || std::strncmp(name, "Runtime_Trace", 13) == 0) return 0;
++  if (DetailFilter().active) {
++  std::u16string filter_name;
++  for (const unsigned char* ch = reinterpret_cast<const unsigned char*>(name); *ch; ++ch) filter_name.push_back(*ch);
++  if (!NativeSelected(isolate, receiver ? NativeKind::kCppBuiltin : NativeKind::kRuntime, filter_name)) return 0;
++  }
++  uint64_t id = 0;
++  DetailEvent(isolate, "native", [&](std::ostream& out) {
++    id = ++detail_calls;
++    out << ",\"phase\":\"entry\",\"callId\":\"" << id << "\",\"boundary\":\""
++        << (receiver ? "cpp-builtin" : "v8-runtime") << "\",\"name\":";
++    Ascii(out, name);
++    if (DetailFilter().active) FilterSourceJson(out, CurrentSource(isolate));
++    if (receiver && count) { out << ",\"receiver\":"; DetailValue(out, isolate, argument(0)); }
++    out << ",\"arguments\":[";
++    for (int i = receiver ? 1 : 0; i < count; ++i) { if (i > (receiver ? 1 : 0)) out << ','; DetailValue(out, isolate, argument(i)); }
++    out << ']';
++  });
++  return id;
++}
++
++void NativeArgumentsExit(Isolate* isolate, uint64_t id, Tagged<Object> result,
++                         Tagged<Object> second, bool pair) {
++  if (!id) return;
++  DetailEvent(isolate, "native", [&](std::ostream& out) {
++    out << ",\"phase\":\"" << (isolate->has_exception() ? "throw" : "return")
++        << "\",\"callId\":\"" << id << "\",\"result\":";
++    DetailValue(out, isolate, result);
++    if (pair) { out << ",\"secondResult\":"; DetailValue(out, isolate, second); }
++    if (isolate->has_exception()) { out << ",\"exception\":"; DetailValue(out, isolate, isolate->exception()); }
++  });
++}
++}  // namespace v8::internal::v8trace
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-detail.h
+@@ -0,0 +1,61 @@
++#ifndef V8_RUNTIME_V8TRACE_DETAIL_H_
++#define V8_RUNTIME_V8TRACE_DETAIL_H_
++
++#include <functional>
++#include <cstdint>
++#include <iosfwd>
++#include <optional>
++#include "src/runtime/v8trace-causality.h"
++#include "include/v8-exception.h"
++#include "src/objects/objects.h"
++namespace v8 { class PropertyDescriptor; }
++
++namespace v8::internal {
++class UnoptimizedJSFrame;
++namespace interpreter { class BytecodeArrayIterator; }
++}
++namespace v8::internal::v8trace {
++void DetailEvent(Isolate*, const char*, const std::function<void(std::ostream&)>&,
++                 std::optional<CausalContext> = std::nullopt);
++void DetailValue(std::ostream&, Isolate*, Tagged<Object>);
++void JsCall(Isolate*, bool, Tagged<Object>);
++void JsException(Isolate*, Tagged<Object>);
++void JsInstruction(Isolate*, UnoptimizedJSFrame*, interpreter::BytecodeArrayIterator&,
++                    int, Tagged<Object>);
++void DetailSessionStart(uint32_t);
++void DetailSessionStop(uint32_t);
++void DetailSessionShutdown();
++void NativeCallsite(Isolate*, UnoptimizedJSFrame*, interpreter::BytecodeArrayIterator&,
++                    int, Tagged<Object>);
++void NativeJsEntry(Isolate*, Address, intptr_t, Address*, Address, Address, intptr_t);
++uint64_t NativeCallbackEnter(Isolate*, Address, v8::ExceptionContext, const void*);
++void NativeCallbackExit(Isolate*, uint64_t, v8::ExceptionContext, const void*);
++void NativeExtra(Isolate*, uint64_t, const char*, Tagged<Object>);
++void NativeDescriptor(Isolate*, uint64_t, const v8::PropertyDescriptor&);
++uint64_t NativeArgumentsEnter(Isolate*, const char*, int,
++                              const std::function<Tagged<Object>(int)>&, bool);
++void NativeArgumentsExit(Isolate*, uint64_t, Tagged<Object>, Tagged<Object>, bool);
++
++class NativeArgumentsScope {
++ public:
++  template <typename Arguments>
++  NativeArgumentsScope(Isolate* isolate, const char* name, Arguments& args,
++                       bool receiver = false)
++      : isolate_(isolate), id_(NativeArgumentsEnter(isolate, name, args.length(),
++                  [&](int index) { return args[index]; }, receiver)) {}
++  template <typename T>
++  T Return(T value) {
++    if constexpr (requires { value.x; value.y; }) {
++      NativeArgumentsExit(isolate_, id_, Tagged<Object>(value.x),
++                          Tagged<Object>(value.y), true);
++    } else {
++      NativeArgumentsExit(isolate_, id_, value, value, false);
++    }
++    return value;
++  }
++ private:
++  Isolate* isolate_;
++  uint64_t id_;
++};
++}  // namespace v8::internal::v8trace
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-env-inl.h
+@@ -0,0 +1,325 @@
++#ifndef V8_RUNTIME_V8TRACE_ENV_INL_H_
++#define V8_RUNTIME_V8TRACE_ENV_INL_H_
++#include <map>
++#include <functional>
++#include <memory>
++#include <unordered_map>
++#include <unordered_set>
++#include "src/api/api-inl.h"
++#include "src/builtins/builtins.h"
++#include "src/base/platform/platform.h"
++#include "src/interpreter/bytecode-array-iterator.h"
++#include "src/objects/lookup-inl.h"
++#include "src/objects/property-descriptor.h"
++#include "src/runtime/v8trace-env.h"
++#include "src/runtime/v8trace-env-storage.h"
++#include "src/runtime/v8trace-call-ledger.h"
++#include "src/runtime/v8trace-detail-filter.h"
++
++namespace v8::internal::v8trace {
++namespace env_probe {
++inline v8trace_call_ledger::Ledger& Session() { static v8trace_call_ledger::Ledger session; return session; }
++inline const std::shared_ptr<v8trace_call_ledger::Producer>& Producer() {
++  static thread_local std::shared_ptr<v8trace_call_ledger::Producer> producer;
++  if (!producer || producer->epoch != Session().epoch.load(std::memory_order_acquire)) producer = Session().Register(base::OS::GetCurrentThreadId());
++  return producer;
++}
++struct Realm {
++  uint64_t id = 0, inventory_epoch = 0;
++  bool alive = true;
++  v8::Global<v8::Context> context;
++  static void Collected(const v8::WeakCallbackInfo<Realm>& info) { auto* realm = info.GetParameter(); realm->context.Reset(); realm->alive = false; }
++};
++struct Registry {
++  uint64_t next_id = 0;
++  uint32_t gc_epoch = UINT32_MAX;
++  std::vector<std::unique_ptr<Realm>> realms;
++  std::unordered_map<Address, Realm*> cache;
++};
++inline auto& Registries() { static thread_local std::unordered_map<Isolate*, Registry> values; return values; }
++inline Realm* CurrentRealm(Isolate* isolate) {
++  if (isolate->context().is_null()) return nullptr;
++  auto& registry = Registries()[isolate]; auto epoch = isolate->heap()->gc_count().value();
++  if (registry.gc_epoch != epoch) { registry.cache.clear(); registry.gc_epoch = epoch; }
++  auto context = isolate->context()->native_context();
++  if (auto found = registry.cache.find(context->address()); found != registry.cache.end() && found->second->alive) return found->second;
++  // Registry misses open API locals inside otherwise sealed runtime hooks.
++  HandleScope handles(isolate);
++  auto* api = reinterpret_cast<v8::Isolate*>(isolate);
++  for (auto it = registry.realms.begin(); it != registry.realms.end();) {
++    if (!(*it)->alive) { it = registry.realms.erase(it); continue; }
++    auto local = (*it)->context.Get(api);
++    if (*Utils::OpenDirectHandle(*local) == context) { registry.cache.emplace(context->address(), it->get()); return it->get(); }
++    ++it;
++  }
++  auto value = std::make_unique<Realm>(); value->id = ++registry.next_id;
++  value->context.Reset(api, Utils::ToLocal(handle(context, isolate)));
++  value->context.SetWeak(value.get(), Realm::Collected, v8::WeakCallbackType::kParameter);
++  auto* result = value.get(); registry.realms.push_back(std::move(value)); registry.cache.emplace(context->address(), result); return result;
++}
++inline const DetailFilterConfig& Filter() { static const auto value = ParseDetailFilter(v8_flags.trace_env_filter); return value; }
++inline bool Selected(Isolate* isolate) {
++  const auto& filter = Filter(); if (!filter.active) return true;
++  if (!filter.valid) return false;
++  const auto& source = CurrentSource(isolate);
++  if (!source.known) return filter.unknown;
++  if (filter.exclude_internal && (source.url.starts_with(u"v8trace:") || source.url.starts_with(u"chrome:") || source.url.starts_with(u"devtools:") || source.url.starts_with(u"chrome-extension:") || source.url.starts_with(u"extensions::") || source.url.starts_with(u"v8/"))) return false;
++  return !FilterAny(source.url, filter.scripts_exclude, true) && (filter.scripts_include.empty() || FilterAny(source.url, filter.scripts_include, true));
++}
++inline bool Enabled() {
++  if (!v8_flags.trace_env || !Session().accepting.load(std::memory_order_acquire)) return false;
++  bool enabled = false; TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("v8.envprobe"), &enabled); return enabled;
++}
++enum class BuiltinQuery { kNone, kHas, kHasOwn, kDescriptor };
++inline bool BuiltinCall(UnoptimizedJSFrame* frame, interpreter::BytecodeArrayIterator& iterator,
++                        Isolate* isolate, Tagged<Object>& receiver, Tagged<Object>& key,
++                        const char*& operation, BuiltinQuery& query, uint32_t& argc) {
++  using interpreter::Bytecode;
++  int first = 0, second = 0;
++  switch (iterator.current_bytecode()) {
++    case Bytecode::kCallAnyReceiver: case Bytecode::kCallProperty:
++      argc=iterator.GetRegisterCountOperand(2);if(!argc)return false;--argc;first=iterator.GetRegisterOperand(1).index()+1;second=first+1;break;
++    case Bytecode::kCallUndefinedReceiver:
++      argc=iterator.GetRegisterCountOperand(2);first=iterator.GetRegisterOperand(1).index();second=first+1;break;
++    case Bytecode::kCallProperty1: argc=1;first=iterator.GetRegisterOperand(2).index();break;
++    case Bytecode::kCallProperty2: argc=2;first=iterator.GetRegisterOperand(2).index();second=iterator.GetRegisterOperand(3).index();break;
++    case Bytecode::kCallUndefinedReceiver1: argc=1;first=iterator.GetRegisterOperand(1).index();break;
++    case Bytecode::kCallUndefinedReceiver2: argc=2;first=iterator.GetRegisterOperand(1).index();second=iterator.GetRegisterOperand(2).index();break;
++    default:return false;
++  }
++  auto callee=frame->ReadInterpreterRegister(iterator.GetRegisterOperand(0).index());
++  if(!IsJSFunction(callee))return false;
++  auto shared=Cast<JSFunction>(callee)->shared();if(!shared->HasBuiltinId())return false;
++  switch(shared->builtin_id()) {
++    case Builtin::kReflectHas:query=BuiltinQuery::kHas;operation="Reflect.has";break;
++    case Builtin::kObjectHasOwn:query=BuiltinQuery::kHasOwn;operation="Object.hasOwn";break;
++    case Builtin::kObjectGetOwnPropertyDescriptor:query=BuiltinQuery::kDescriptor;operation="Object.getOwnPropertyDescriptor";break;
++    case Builtin::kReflectGetOwnPropertyDescriptor:query=BuiltinQuery::kDescriptor;operation="Reflect.getOwnPropertyDescriptor";break;
++    default:return false;
++  }
++  receiver=argc?frame->ReadInterpreterRegister(first):ReadOnlyRoots(isolate).undefined_value();
++  key=argc>1?frame->ReadInterpreterRegister(second):ReadOnlyRoots(isolate).undefined_value();
++  return true;
++}
++inline void BuiltinDescriptor(std::ostream& out, Isolate* isolate, Tagged<Object> value) {
++  if(!IsJSObject(value)||IsJSProxy(value)){out<<"null";return;}
++  EnvInventoryBudget budget{16};auto properties=EnvOwnStorage(isolate,Cast<JSObject>(value),budget);
++  out<<'{';bool comma=false;
++  for(const auto& property:properties){if(!IsString(property.key))continue;if(comma)out<<',';comma=true;JsonString(out,Cast<String>(property.key));out<<':';Value(out,isolate,property.value);}
++  out<<'}';
++}
++struct Pending { uint64_t id, epoch; int offset; bool mutation; std::string exception; BuiltinQuery query = BuiltinQuery::kNone; int continuation = -1, after_short_star = -1; };
++struct ThreadState { uint64_t epoch = 0, sequence = 0, next_id = 0; bool configured = false; std::unordered_map<Isolate*, std::map<Address, Pending>> pending; std::unordered_set<Isolate*> reconcile; };
++inline ThreadState& State() {
++  static thread_local ThreadState state;
++  auto epoch = Session().epoch.load(std::memory_order_acquire);
++  if (state.epoch != epoch) { state.epoch = epoch; state.sequence = 0; state.configured = false; state.pending.clear(); state.reconcile.clear(); }
++  return state;
++}
++inline void Emit(Isolate* isolate, const char* phase, const std::function<void(std::ostream&)>& body) {
++#if defined(V8_USE_PERFETTO)
++  if (!Enabled()) return;
++  auto producer = Producer(); v8trace_call_ledger::WriteGuard guard(Session(), producer); if (!guard) return;
++  TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.envprobe"), "V8TraceEnv", [&](perfetto::EventContext context) {
++    HandleScope handles(isolate);
++    DisallowGarbageCollection no_gc; auto& state = State(); auto* realm = CurrentRealm(isolate);
++    std::ostringstream out; out.imbue(std::locale::classic());
++    out << "{\"protocol\":\"v8trace/env/1\",\"phase\":\"" << phase << "\",\"producerSeq\":" << ++state.sequence
++        << ",\"producerId\":\"" << producer->producer_id << "\",\"epoch\":" << producer->epoch
++        << ",\"isolateId\":\"" << std::hex << isolate->debug()->IsolateId() << std::dec << "\",\"realmId\":" << (realm ? realm->id : 0)
++        << ",\"gcEpoch\":" << isolate->heap()->gc_count().value() << ",\"identityUnchanged\":true";
++    const auto& source = CurrentSource(isolate);
++    out << ",\"source\":{\"known\":" << (source.known ? "true" : "false") << ",\"scriptId\":" << source.script_id << ",\"functionStart\":" << source.function_start << ",\"url\":" << source.url_json << '}';
++    body(out); out << '}'; context.AddDebugAnnotation("record", out.str()); producer->emitted.fetch_add(1, std::memory_order_relaxed);
++  });
++#endif
++}
++inline void Complete(Isolate* isolate, const Pending& operation, Tagged<Object> accumulator, const char* basis) {
++  Emit(isolate,"property-exit",[&](std::ostream& out){
++    out<<",\"operationId\":\""<<operation.id<<"\",\"completion\":\"normal\",\"returnObservation\":\""<<basis<<"\",\""<<(operation.mutation?"accumulatorAfter":"result")<<"\":";ObservedValue(out,isolate,accumulator);
++      if(operation.query==env_probe::BuiltinQuery::kDescriptor){out<<",\"outcome\":\""<<(IsUndefined(accumulator)?"absent":"present")<<"\",\"descriptor\":";env_probe::BuiltinDescriptor(out,isolate,accumulator);}
++      else if(operation.query!=env_probe::BuiltinQuery::kNone){bool present=accumulator==ReadOnlyRoots(isolate).true_value();out<<",\"outcome\":\""<<(present?"present":"absent")<<"\",\"booleanResult\":"<<(present?"true":"false");}
++  });
++}
++inline void Configure(Isolate* isolate) {
++  auto& state = State();
++  if (!state.configured) {
++    Emit(isolate, "configuration", [&](std::ostream& out) {
++      out << ",\"engine\":\"Ignition\",\"absent\":" << (v8_flags.trace_env_absent ? "true" : "false") << ",\"interfaces\":" << (v8_flags.trace_env_interfaces ? "true" : "false")
++          << ",\"mutations\":" << (v8_flags.trace_env_mutations ? "true" : "false") << ",\"inventory\":" << (v8_flags.trace_env_inventory ? "true" : "false")
++          << ",\"filter\":" << v8trace_json::EncodeUtf16(std::u16string(Filter().token.begin(), Filter().token.end())) << ",\"propertyBudget\":" << v8_flags.trace_env_inventory_properties
++          << ",\"coverage\":\"interpreted-host-properties-and-native-reflection\",\"invokesUserCode\":false";
++    }); state.configured = true;
++  }
++  if (!Selected(isolate)) return;
++  auto* realm = CurrentRealm(isolate);
++  if (realm && v8_flags.trace_env_inventory && realm->inventory_epoch != state.epoch) {
++    realm->inventory_epoch = state.epoch;
++    Emit(isolate, "inventory", [&](std::ostream& out) { EnvGlobalInventory(out, isolate, v8_flags.trace_env_inventory_properties); });
++  }
++}
++inline bool Admit(Isolate* isolate) {
++  if (!Enabled()) return false;
++  auto producer = Producer(); producer->attempted.fetch_add(1, std::memory_order_relaxed);
++  bool selected = Selected(isolate); (selected ? producer->selected : producer->filtered).fetch_add(1, std::memory_order_relaxed);
++  Configure(isolate); return selected;
++}
++inline const char* Presence(Isolate* isolate, Tagged<Object> receiver, Tagged<Object> key) {
++  if (!IsSymbol(key) && !IsInternalizedString(key)) return "unknown-key-coercion";
++  if (IsString(key)) { uint32_t index; if (Cast<String>(key)->AsArrayIndex(&index)) return "unknown-indexed-storage"; }
++  auto name = Cast<Name>(key);
++  for (int depth = 0; depth < 1024; ++depth) {
++    if (IsNull(receiver)) return "absent-raw-chain";
++    if (!IsJSObject(receiver) || IsJSProxy(receiver)) return "unknown-proxy-or-exotic";
++    auto object = Cast<JSObject>(receiver); bool present = false;
++    if (IsJSGlobalObject(object)) {
++      auto dictionary = Cast<JSGlobalObject>(object)->global_dictionary(kAcquireLoad);
++      auto entry = dictionary->FindEntry(isolate, handle(name, isolate));
++      present = entry.is_found() && !IsTheHole(dictionary->ValueAt(entry));
++    }
++    else if (object->HasFastProperties()) present = object->map()->instance_descriptors()->Search(name, object->map()).is_found();
++    else if constexpr (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) present = object->property_dictionary_swiss()->FindEntry(isolate, name).is_found();
++    else present = object->property_dictionary()->FindEntry(isolate, handle(name, isolate)).is_found();
++    if (present) return "present-raw-chain";
++    if (object->map()->has_named_interceptor() || object->map()->is_access_check_needed()) return "unknown-dynamic-host";
++    receiver = object->map()->prototype();
++  }
++  return "unknown-prototype-depth";
++}
++inline void Descriptor(std::ostream& out, Isolate* isolate, PropertyDescriptor* descriptor) {
++  if (!descriptor) { out << "null"; return; }
++  out << '{'; bool comma = false;
++  auto value = [&](const char* key, Tagged<Object> data) { if (comma) out << ','; comma = true; out << '"' << key << "\":"; Value(out, isolate, data); };
++  auto boolean = [&](const char* key, bool data) { if (comma) out << ','; comma = true; out << '"' << key << "\":" << (data ? "true" : "false"); };
++  if (descriptor->has_value()) value("value", *descriptor->value());
++  if (descriptor->has_get()) value("get", *descriptor->get());
++  if (descriptor->has_set()) value("set", *descriptor->set());
++  if (descriptor->has_writable()) boolean("writable", descriptor->writable());
++  if (descriptor->has_enumerable()) boolean("enumerable", descriptor->enumerable());
++  if (descriptor->has_configurable()) boolean("configurable", descriptor->configurable());
++  out << '}';
++}
++struct Owner { std::mutex mutex; int64_t instance = -1; };
++inline Owner& TraceOwner() { static Owner owner; return owner; }
++inline void Stop() {
++  for (const auto& producer : Session().Stop()) {
++#if defined(V8_USE_PERFETTO)
++    TRACE_EVENT_INSTANT(TRACE_DISABLED_BY_DEFAULT("v8.envprobe"), "V8TraceEnvStats", [&](perfetto::EventContext context) {
++      std::ostringstream out;
++      out << "{\"protocol\":\"v8trace/env-stats/1\",\"producerThreadId\":" << producer.thread_id << ",\"producerId\":\"" << producer.producer_id << "\",\"epoch\":" << producer.epoch
++          << ",\"final\":" << (producer.final ? "true" : "false") << ",\"attempted\":" << producer.attempted << ",\"selected\":" << producer.selected << ",\"filtered\":" << producer.filtered << ",\"emittedEvents\":" << producer.emitted << '}';
++      context.AddDebugAnnotation("record", out.str());
++    });
++#endif
++  }
++}
++}
++void EnvSessionStart(uint32_t instance) {
++  bool enabled = false; TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("v8.envprobe"), &enabled);
++  if (!v8_flags.trace_env || !enabled) return;
++  auto& owner = env_probe::TraceOwner(); std::lock_guard<std::mutex> lock(owner.mutex);
++  if (owner.instance != -1) return; owner.instance = instance; env_probe::Session().Start();
++}
++void EnvSessionStop(uint32_t instance) {
++  auto& owner = env_probe::TraceOwner(); std::lock_guard<std::mutex> lock(owner.mutex);
++  if (owner.instance == instance) { env_probe::Stop(); owner.instance = -1; }
++}
++void EnvSessionShutdown() {
++  auto& owner = env_probe::TraceOwner(); std::lock_guard<std::mutex> lock(owner.mutex);
++  if (owner.instance != -1) { env_probe::Stop(); owner.instance = -1; }
++}
++void EnvIsolateDispose(Isolate* isolate) { env_probe::Registries().erase(isolate); env_probe::State().pending.erase(isolate); }
++void EnvException(Isolate* isolate, Tagged<Object> exception) {
++  if (!env_probe::Enabled()) return;
++  std::ostringstream out; Value(out, isolate, exception);
++  env_probe::State().reconcile.insert(isolate);
++  for (auto& [frame, pending] : env_probe::State().pending[isolate]) pending.exception = out.str();
++}
++uint64_t EnvQueryEnter(LookupIterator* it, const char* operation, bool mutation) {
++  if (!v8_flags.trace_env || (mutation ? !v8_flags.trace_env_mutations : (!v8_flags.trace_env_interfaces && !v8_flags.trace_env_absent))) return 0;
++  auto isolate = it->isolate(); if (!EnvHost(*it->GetReceiver()) || !env_probe::Admit(isolate)) return 0;
++  auto id = ++env_probe::State().next_id;
++  env_probe::Emit(isolate, "query-entry", [&](std::ostream& out) {
++    out << ",\"operationId\":\"" << id << "\",\"operation\":\"" << operation << "\",\"mutation\":" << (mutation ? "true" : "false") << ",\"receiver\":"; Value(out, isolate, *it->GetReceiver());
++    out << ",\"key\":"; if (it->IsElement()) out << "{\"type\":\"index\",\"value\":" << it->index() << '}'; else Value(out, isolate, *it->name());
++  }); return id;
++}
++void EnvQueryExit(LookupIterator* it, uint64_t id, int outcome, PropertyDescriptor* descriptor) {
++  if (!id || !env_probe::Enabled()) return;
++  auto isolate = it->isolate(); env_probe::Emit(isolate, "query-exit", [&](std::ostream& out) {
++    out << ",\"operationId\":\"" << id << "\",\"outcome\":\"" << (outcome < 0 ? "exception" : outcome ? "present" : "absent") << "\",\"descriptor\":";
++    env_probe::Descriptor(out, isolate, outcome > 0 ? descriptor : nullptr);
++  });
++}
++uint64_t EnvValueEnter(Isolate* isolate, Tagged<Object> receiver, Tagged<Object> key, const char* operation, bool mutation, Tagged<Object> input, PropertyDescriptor* descriptor) {
++  if (!v8_flags.trace_env || (mutation ? !v8_flags.trace_env_mutations : (!v8_flags.trace_env_interfaces && !v8_flags.trace_env_absent))) return 0;
++  if (!EnvHost(receiver) || !env_probe::Admit(isolate)) return 0;
++  auto id = ++env_probe::State().next_id;
++  env_probe::Emit(isolate, "query-entry", [&](std::ostream& out) {
++    out << ",\"operationId\":\"" << id << "\",\"operation\":\"" << operation << "\",\"mutation\":" << (mutation ? "true" : "false") << ",\"receiver\":"; Value(out, isolate, receiver);
++    out << ",\"key\":"; Value(out, isolate, key); out << ",\"input\":"; ObservedValue(out, isolate, input);
++    out << ",\"descriptor\":"; env_probe::Descriptor(out, isolate, descriptor);
++  }); return id;
++}
++void EnvValueExit(Isolate* isolate, uint64_t id, int outcome, PropertyDescriptor* descriptor) {
++  if (!id || !env_probe::Enabled()) return;
++  env_probe::Emit(isolate, "query-exit", [&](std::ostream& out) {
++    out << ",\"operationId\":\"" << id << "\",\"booleanResult\":" << (outcome < 0 ? "null" : outcome ? "true" : "false") << ",\"exception\":" << (outcome < 0 ? "true" : "false") << ",\"descriptor\":";
++    env_probe::Descriptor(out, isolate, outcome > 0 ? descriptor : nullptr);
++  });
++}
++void EnvInstruction(Isolate* isolate, UnoptimizedJSFrame* frame, interpreter::BytecodeArrayIterator& iterator, int offset, Tagged<Object> accumulator, bool entry) {
++  using interpreter::Bytecode;
++  if (!env_probe::Enabled() || (iterator.current_operand_scale() != interpreter::OperandScale::kSingle && offset == iterator.current_offset())) return;
++  auto& pending = env_probe::State().pending[isolate];
++  if (entry && env_probe::State().reconcile.erase(isolate)) {
++    std::unordered_set<Address> alive;
++    for (JavaScriptStackFrameIterator it(isolate); !it.done(); it.Advance()) alive.insert(it.frame()->fp());
++    for (auto it = pending.begin(); it != pending.end();) {
++      if (alive.contains(it->first)) { ++it; continue; }
++      auto old = it->second; it = pending.erase(it);
++      env_probe::Emit(isolate, "property-interrupted", [&](std::ostream& out) { out << ",\"operationId\":\"" << old.id << "\",\"boundary\":\"native-frame-unwind\",\"exceptionObserved\":" << (old.exception.empty() ? "null" : old.exception); });
++    }
++  }
++  if (!entry) {
++    auto found = pending.find(frame->fp()); if (found == pending.end() || found->second.offset != iterator.current_offset()) return;
++    auto operation = found->second; pending.erase(found);
++    env_probe::Complete(isolate,operation,accumulator,"instruction-exit"); return;
++  }
++  for (auto it = pending.begin(); it != pending.end();) {
++    if (it->first != frame->fp()) { ++it; continue; }
++    auto old = it->second; it = pending.erase(it);
++    if(old.exception.empty()&&(iterator.current_offset()==old.continuation||iterator.current_offset()==old.after_short_star)){
++      env_probe::Complete(isolate,old,accumulator,"same-frame-normal-continuation");continue;
++    }
++    env_probe::Emit(isolate, "property-interrupted", [&](std::ostream& out) { out << ",\"operationId\":\"" << old.id << "\",\"boundary\":\"next-instruction-without-normal-exit\",\"exceptionObserved\":" << (old.exception.empty() ? "null" : old.exception); });
++  }
++  auto bytecode = iterator.current_bytecode(); Tagged<Object> receiver, key; bool mutation = false; const char* operation = nullptr; env_probe::BuiltinQuery query=env_probe::BuiltinQuery::kNone;uint32_t argc=0;
++  auto reg = [&](int index) { return frame->ReadInterpreterRegister(iterator.GetRegisterOperand(index).index()); };
++  auto constant = [&](int index) { return iterator.GetConstantAtIndex(iterator.GetConstantPoolIndexOperand(index)); };
++  switch (bytecode) {
++    case Bytecode::kLdaGlobal: case Bytecode::kLdaGlobalInsideTypeof: receiver = isolate->context()->native_context()->global_object(); key = constant(0); operation = "global-get"; break;
++    case Bytecode::kStaGlobal: receiver = isolate->context()->native_context()->global_object(); key = constant(0); operation = "global-set"; mutation = true; break;
++    case Bytecode::kGetNamedProperty: receiver = reg(0); key = constant(1); operation = "get-named"; break;
++    case Bytecode::kGetNamedPropertyFromSuper: receiver = reg(0); key = constant(1); operation = "get-named-super"; break;
++    case Bytecode::kGetKeyedProperty: case Bytecode::kGetEnumeratedKeyedProperty: receiver = reg(0); key = accumulator; operation = "get-keyed"; break;
++    case Bytecode::kSetNamedProperty: case Bytecode::kDefineNamedOwnProperty: receiver = reg(0); key = constant(1); operation = "set-named"; mutation = true; break;
++    case Bytecode::kSetKeyedProperty: case Bytecode::kDefineKeyedOwnProperty: receiver = reg(0); key = reg(1); operation = "set-keyed"; mutation = true; break;
++    case Bytecode::kDeletePropertyStrict: case Bytecode::kDeletePropertySloppy: receiver = reg(0); key = accumulator; operation = "delete"; mutation = true; break;
++    case Bytecode::kTestIn: receiver = reg(0); key = accumulator; operation = "in"; break;
++    default: if(env_probe::BuiltinCall(frame,iterator,isolate,receiver,key,operation,query,argc))break;if (v8_flags.trace_env_inventory) env_probe::Configure(isolate); return;
++  }
++  if (mutation ? !v8_flags.trace_env_mutations : (!v8_flags.trace_env_interfaces && !v8_flags.trace_env_absent)) return;
++  if (!EnvHost(receiver) || !env_probe::Admit(isolate)) return;
++  uint64_t id = ++env_probe::State().next_id;env_probe::Pending observation{id, env_probe::State().epoch, iterator.current_offset(), mutation, {}, query};
++  {observation.continuation=iterator.next_offset();observation.after_short_star=observation.continuation;auto bytes=iterator.bytecode_array();if(observation.continuation<bytes->length()&&interpreter::Bytecodes::IsShortStar(static_cast<Bytecode>(bytes->get(observation.continuation))))++observation.after_short_star;}
++  pending.emplace(frame->fp(),std::move(observation));
++  env_probe::Emit(isolate, "property-entry", [&](std::ostream& out) {
++    out << ",\"operationId\":\"" << id << "\",\"operation\":\"" << operation << "\",\"instructionOffset\":" << iterator.current_offset() << ",\"receiver\":"; Value(out, isolate, receiver);
++    out << ",\"key\":"; Value(out, isolate, key);
++    out << ",\"presenceBefore\":\"" << (bytecode == Bytecode::kGetNamedPropertyFromSuper ? "unknown-super-lookup" : env_probe::Presence(isolate, receiver, key)) << "\",\"input\":"; ObservedValue(out, isolate, accumulator);
++    if(query!=env_probe::BuiltinQuery::kNone)out<<",\"builtinArgumentCount\":"<<argc<<",\"builtinArgumentScope\":\"target-and-key; original key conversion is not repeated\"";
++  });
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-env-storage.h
+@@ -0,0 +1,140 @@
++#ifndef V8_RUNTIME_V8TRACE_ENV_STORAGE_H_
++#define V8_RUNTIME_V8TRACE_ENV_STORAGE_H_
++
++#include <algorithm>
++#include <string_view>
++#include <vector>
++#include "src/objects/dictionary-inl.h"
++#include "src/objects/js-function-inl.h"
++#include "src/objects/property-cell-inl.h"
++#include "src/objects/swiss-name-dictionary-inl.h"
++#include "src/runtime/v8trace-object-values.h"
++
++namespace v8::internal::v8trace {
++inline bool EnvHost(Tagged<Object> value) {
++  if (!IsHeapObject(value)) return false;
++  if (IsJSGlobalObject(value) || IsJSGlobalProxy(value) || IsJSApiObject(value) || IsJSSpecialApiObject(value)) return true;
++  if (IsJSFunction(value)) return Cast<JSFunction>(value)->shared()->IsApiFunction();
++  if (IsJSObject(value)) {
++    auto constructor = Cast<JSObject>(value)->map()->GetConstructor();
++    return IsJSFunction(constructor) && Cast<JSFunction>(constructor)->shared()->IsApiFunction();
++  }
++  return false;
++}
++
++struct EnvRawProperty {
++  Tagged<Name> key;
++  Tagged<Object> value;
++  PropertyDetails details;
++  uint32_t order;
++  bool indexed = false, symbol = false;
++  uint32_t index = 0;
++};
++struct EnvInventoryBudget {
++  uint32_t maximum, used = 0, scans = 0;
++  bool complete = true;
++  bool scan() { if (uint64_t(++scans) <= uint64_t(maximum) * 16) return true; complete = false; return false; }
++  bool take() { if (used < maximum) { ++used; return true; } complete = false; return false; }
++};
++inline std::vector<EnvRawProperty> EnvOwnStorage(Isolate* isolate, Tagged<JSObject> object, EnvInventoryBudget& budget) {
++  std::vector<EnvRawProperty> result;
++  auto append = [&](Tagged<Name> key, Tagged<Object> value, PropertyDetails details, uint32_t order) {
++    if (!budget.take()) return false;
++    EnvRawProperty property{key, value, details, order}; property.symbol = IsSymbol(key);
++    if (IsString(key)) property.indexed = Cast<String>(key)->AsArrayIndex(&property.index);
++    result.push_back(property); return true;
++  };
++  if (IsJSGlobalObject(object)) {
++    auto dictionary = Cast<JSGlobalObject>(object)->global_dictionary(kAcquireLoad);
++    for (InternalIndex index : dictionary->IterateEntries()) {
++      if (!budget.scan()) break;
++      auto value = dictionary->KeyAt(index); if (!IsPropertyCell(value)) continue;
++      auto cell = Cast<PropertyCell>(value); auto details = cell->property_details();
++      if (IsTheHole(cell->value())) continue;
++      if (!append(cell->name(), cell->value(), details, details.dictionary_index())) break;
++    }
++  } else if (object->HasFastProperties()) {
++    auto descriptors = object->map()->instance_descriptors(); uint32_t order = 0;
++    for (InternalIndex index : object->map()->IterateOwnDescriptors()) {
++      if (!budget.scan()) break;
++      auto details = descriptors->GetDetails(index);
++      auto value = details.location() == PropertyLocation::kField ? object->RawFastPropertyAt(FieldIndex::ForDetails(object->map(), details)) : descriptors->GetStrongValue(index);
++      if (!append(descriptors->GetKey(index), value, details, order++)) break;
++    }
++  } else if constexpr (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
++    auto dictionary = object->property_dictionary_swiss();
++    uint32_t order = 0;
++    for (InternalIndex index : dictionary->IterateEntries()) {
++      if (!budget.scan()) break;
++      auto key = dictionary->KeyAt(index); if (!IsName(key)) continue;
++      auto details = dictionary->DetailsAt(index);
++      if (!append(Cast<Name>(key), dictionary->ValueAt(index), details, order++)) break;
++    }
++  } else {
++    auto dictionary = object->property_dictionary();
++    for (InternalIndex index : dictionary->IterateEntries()) {
++      if (!budget.scan()) break;
++      Tagged<Object> key; if (!dictionary->ToKey(index, &key) || !IsName(key)) continue;
++      auto details = dictionary->DetailsAt(index);
++      if (!append(Cast<Name>(key), dictionary->ValueAt(index), details, details.dictionary_index())) break;
++    }
++  }
++  std::stable_sort(result.begin(), result.end(), [](const auto& left, const auto& right) {
++    if (left.indexed != right.indexed) return left.indexed;
++    if (left.indexed) return left.index < right.index;
++    if (left.symbol != right.symbol) return !left.symbol;
++    return left.order < right.order;
++  });
++  return result;
++}
++inline void EnvPropertyJson(std::ostream& out, Isolate* isolate, const EnvRawProperty& property) {
++  out << "{\"key\":"; Value(out, isolate, property.key);
++  out << ",\"order\":" << property.order << ",\"kind\":\"" << (property.details.kind() == PropertyKind::kData ? "data" : "accessor")
++      << "\",\"enumerable\":" << (property.details.IsDontEnum() ? "false" : "true")
++      << ",\"configurable\":" << (property.details.IsConfigurable() ? "true" : "false")
++      << ",\"writable\":" << (property.details.kind() == PropertyKind::kAccessor ? "null" : property.details.IsReadOnly() ? "false" : "true");
++  if (IsSymbol(property.key)) { out << ",\"symbolDescription\":"; Value(out, isolate, Cast<Symbol>(property.key)->description()); }
++  out << ",\"storedValue\":";
++  Value(out, isolate, property.value);
++  if (property.details.kind() == PropertyKind::kAccessor && IsAccessorPair(property.value)) {
++    auto pair = Cast<AccessorPair>(property.value);
++    out << ",\"getter\":"; Value(out, isolate, pair->getter());
++    out << ",\"setter\":"; Value(out, isolate, pair->setter()); out << ",\"invoked\":false";
++  }
++  out << '}';
++}
++inline void EnvStorageJson(std::ostream& out, Isolate* isolate, Tagged<Object> value, EnvInventoryBudget& budget) {
++  out << "{\"object\":"; Value(out, isolate, value);
++  if (!IsJSObject(value) || IsJSProxy(value)) { out << ",\"coverage\":\"opaque\",\"invokesUserCode\":false}"; return; }
++  auto object = Cast<JSObject>(value);
++  out << ",\"prototype\":"; Value(out, isolate, object->map()->prototype());
++  out << ",\"dynamicInterceptor\":" << (object->map()->has_named_interceptor() || object->map()->has_indexed_interceptor() ? "true" : "false")
++      << ",\"accessCheck\":" << (object->map()->is_access_check_needed() ? "true" : "false")
++      << ",\"invokesGetters\":false,\"invokesProxyTraps\":false,\"elementsEnumerated\":false,\"properties\":[";
++  auto properties = EnvOwnStorage(isolate, object, budget); bool comma = false;
++  for (const auto& property : properties) { if (comma) out << ','; comma = true; EnvPropertyJson(out, isolate, property); }
++  out << "],\"coverage\":\"" << (budget.complete ? "raw-named-storage" : "partial-budget") << "\"}";
++}
++inline void EnvGlobalInventory(std::ostream& out, Isolate* isolate, uint32_t maximum) {
++  auto global = isolate->context()->native_context()->global_object(); EnvInventoryBudget budget{maximum};
++  out << ",\"global\":"; EnvStorageJson(out, isolate, global, budget);
++  out << ",\"interfaces\":["; bool comma = false;
++  auto definitions = EnvOwnStorage(isolate, global, budget);
++  for (const auto& definition : definitions) {
++    if (!IsJSFunction(definition.value)) continue;
++    auto function = Cast<JSFunction>(definition.value); auto shared = function->shared();
++    if (!shared->IsApiFunction() && !shared->HasBuiltinId()) continue;
++    if (comma) out << ','; comma = true;
++    out << "{\"name\":"; Value(out, isolate, definition.key);
++    out << ",\"apiFunction\":" << (shared->IsApiFunction() ? "true" : "false") << ",\"formalLength\":" << shared->length()
++        << ",\"statics\":"; EnvStorageJson(out, isolate, function, budget);
++    out << ",\"prototype\":";
++    if (function->has_prototype_slot() && function->has_instance_prototype()) EnvStorageJson(out, isolate, function->instance_prototype(), budget); else out << "null";
++    out << ",\"instanceCoverage\":\"observed-separately\"}";
++  }
++  out << "],\"propertyBudget\":" << budget.maximum << ",\"propertiesObserved\":" << budget.used
++      << ",\"slotsScanned\":" << budget.scans << ",\"coverage\":\"" << (budget.complete ? "declared-raw-storage" : "partial-budget")
++      << "\",\"lazyAccessorsEvaluated\":false,\"virtualPropertiesEnumerated\":false";
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-env.h
+@@ -0,0 +1,24 @@
++#ifndef V8_RUNTIME_V8TRACE_ENV_H_
++#define V8_RUNTIME_V8TRACE_ENV_H_
++#include <cstdint>
++#include "src/objects/objects.h"
++namespace v8::internal {
++class Isolate;
++class UnoptimizedJSFrame;
++class LookupIterator;
++class PropertyDescriptor;
++namespace interpreter { class BytecodeArrayIterator; }
++namespace v8trace {
++void EnvSessionStart(uint32_t);
++void EnvSessionStop(uint32_t);
++void EnvSessionShutdown();
++void EnvIsolateDispose(Isolate*);
++void EnvInstruction(Isolate*, UnoptimizedJSFrame*, interpreter::BytecodeArrayIterator&, int, Tagged<Object>, bool);
++void EnvException(Isolate*, Tagged<Object>);
++uint64_t EnvValueEnter(Isolate*, Tagged<Object>, Tagged<Object>, const char*, bool, Tagged<Object>, PropertyDescriptor* = nullptr);
++void EnvValueExit(Isolate*, uint64_t, int, PropertyDescriptor* = nullptr);
++uint64_t EnvQueryEnter(LookupIterator*, const char*, bool = false);
++void EnvQueryExit(LookupIterator*, uint64_t, int, PropertyDescriptor* = nullptr);
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-function-cache.h
+@@ -0,0 +1,59 @@
++#ifndef V8_RUNTIME_V8TRACE_FUNCTION_CACHE_H_
++#define V8_RUNTIME_V8TRACE_FUNCTION_CACHE_H_
++
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <list>
++#include <unordered_map>
++#include <utility>
++
++namespace v8trace_cache {
++struct FunctionKey {
++  uint64_t isolate;
++  int32_t unique_id, script_id;
++  uint32_t gc_epoch = 0;
++  bool operator==(const FunctionKey&) const = default;
++};
++struct FunctionHash {
++  size_t operator()(const FunctionKey& key) const {
++    auto hash = std::hash<uint64_t>{}(key.isolate);
++    hash ^= std::hash<int32_t>{}(key.unique_id) + (hash << 6) + (hash >> 2);
++    hash ^= std::hash<int32_t>{}(key.script_id) + (hash << 6) + (hash >> 2);
++    return hash ^ (std::hash<uint32_t>{}(key.gc_epoch) + (hash << 6) + (hash >> 2));
++  }
++};
++template <typename Value, size_t Capacity>
++class FunctionCache {
++  static_assert(Capacity > 0);
++ public:
++  FunctionCache() = default;
++  FunctionCache(const FunctionCache&) = delete;
++  FunctionCache& operator=(const FunctionCache&) = delete;
++  Value* Find(FunctionKey key, uintptr_t name_stamp, uintptr_t url_stamp) {
++    auto found = entries_.find(key);
++    if (found == entries_.end()) return nullptr;
++    auto entry = found->second;
++    // Stamps only invalidate metadata; they are never dereferenced after a GC.
++    if (entry->name_stamp != name_stamp || entry->url_stamp != url_stamp) {
++      order_.erase(entry); entries_.erase(found); return nullptr;
++    }
++    order_.splice(order_.begin(), order_, entry);
++    return &entry->value;
++  }
++  Value& Put(FunctionKey key, uintptr_t name_stamp, uintptr_t url_stamp, Value value) {
++    auto found = entries_.find(key);
++    if (found != entries_.end()) { order_.erase(found->second); entries_.erase(found); }
++    if (order_.size() >= Capacity) { entries_.erase(order_.back().key); order_.pop_back(); }
++    order_.push_front({key, name_stamp, url_stamp, std::move(value)});
++    entries_[key] = order_.begin();
++    return order_.front().value;
++  }
++  size_t size() const { return entries_.size(); }
++ private:
++  struct Entry { FunctionKey key; uintptr_t name_stamp, url_stamp; Value value; };
++  std::list<Entry> order_;
++  std::unordered_map<FunctionKey, typename std::list<Entry>::iterator, FunctionHash> entries_;
++};
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-identity-inl.h
+@@ -0,0 +1,63 @@
++#ifndef V8_RUNTIME_V8TRACE_IDENTITY_INL_H_
++#define V8_RUNTIME_V8TRACE_IDENTITY_INL_H_
++#include "include/v8-trace-identity.h"
++namespace v8 {
++std::string V8TraceValueJSON(v8::Isolate* api, v8::Local<v8::Value> value) {
++  if (!api || value.IsEmpty()) return "{\"type\":\"unobserved\"}";
++  auto* isolate = reinterpret_cast<internal::Isolate*>(api);
++  internal::HandleScope handles(isolate); internal::DisallowGarbageCollection no_gc;
++  std::ostringstream output; output.imbue(std::locale::classic());
++  internal::v8trace::ObservedValue(output, isolate, *Utils::OpenDirectHandle(*value)); return output.str();
++}
++V8TraceIdentitySnapshot V8TraceIdentity(v8::Isolate* api) {
++  V8TraceIdentitySnapshot result;
++  if (!api) return result;
++  auto* isolate = reinterpret_cast<internal::Isolate*>(api);
++  internal::HandleScope handles(isolate);
++  internal::DisallowGarbageCollection no_gc;
++  result.isolate_id = isolate->debug()->IsolateId();
++  if (auto* realm = internal::v8trace::env_probe::CurrentRealm(isolate)) result.realm_id = realm->id;
++  if (internal::v8trace::JsTracingEnabled()) {
++    result.producer_id = internal::v8trace::CallStats().producer_id;
++    result.epoch = internal::v8trace::CallStats().epoch;
++    result.js_event_sequence = internal::v8trace::detail_sequences[0];
++    internal::JavaScriptStackFrameIterator frame(isolate);
++    if (!frame.done()) {
++      auto& calls = internal::v8trace::js_calls[isolate];
++      auto found = calls.find(frame.frame()->fp());
++      if (found != calls.end()) {
++        result.js_call_id = found->second.id;
++        result.producer_id = internal::v8trace::CallStats().producer_id;
++        result.epoch = internal::v8trace::CallStats().epoch;
++      }
++    }
++  }
++  if (auto* callback = isolate->external_callback_scope()) result.native_call_id = callback->v8trace_call_id();
++  result.native_event_sequence = internal::v8trace::detail_sequences[1];
++  result.wasm_event_sequence = internal::v8trace::detail_sequences[2];
++  result.opcode_event_sequence = 0;
++  return result;
++}
++std::string V8TraceCallStackJSON(v8::Isolate* api) {
++  if(!api) return "[]";
++  auto* isolate=reinterpret_cast<internal::Isolate*>(api);
++  internal::HandleScope handles(isolate);internal::DisallowGarbageCollection no_gc;
++  std::ostringstream out;out.imbue(std::locale::classic());out<<'[';bool comma=false;
++  auto& calls=internal::v8trace::js_calls[isolate];
++  for(internal::JavaScriptStackFrameIterator iterator(isolate);!iterator.done();iterator.Advance()) {
++    auto* frame=iterator.frame();auto function=frame->function();auto shared=function->shared();
++    if(comma)out<<',';comma=true;out<<"{\"callKnown\":";
++    auto found=calls.find(frame->fp());out<<(found!=calls.end()?"true":"false");
++    if(found!=calls.end())out<<",\"callId\":\""<<found->second.id<<'"';
++    out<<",\"functionName\":";internal::v8trace::JsonString(out,shared->Name());
++    out<<",\"functionStart\":"<<shared->StartPosition();
++    if(internal::IsScript(shared->script())) {
++      auto script=internal::Cast<internal::Script>(shared->script());out<<",\"scriptId\":"<<script->id()<<",\"scriptUrl\":";
++      if(internal::IsString(script->name())) internal::v8trace::JsonString(out,internal::Cast<internal::String>(script->name()));else out<<"null";
++    }
++    out<<'}';
++  }
++  out<<']';return out.str();
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-json.h
+@@ -0,0 +1,75 @@
++#ifndef V8_RUNTIME_V8TRACE_JSON_H_
++#define V8_RUNTIME_V8TRACE_JSON_H_
++
++#include <array>
++#include <charconv>
++#include <cstdint>
++#include <limits>
++#include <ostream>
++#include <sstream>
++#include <string>
++#include <string_view>
++#include <type_traits>
++
++namespace v8trace_json {
++
++template <typename T>
++struct Numeric { T value; int base = 10; };
++
++template <typename T>
++  requires ((std::is_integral_v<T> && !std::is_same_v<T, bool>) || std::is_floating_point_v<T>)
++Numeric<T> Number(T value) { return {value}; }
++
++template <typename T>
++  requires (std::is_integral_v<T> && !std::is_same_v<T, bool>)
++Numeric<T> Hex(T value) { return {value, 16}; }
++
++template <typename T>
++std::ostream& operator<<(std::ostream& out, Numeric<T> number) {
++  std::array<char, 64> buffer;
++  std::to_chars_result result;
++  if constexpr (std::is_integral_v<T>) {
++    result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), number.value, number.base);
++  } else {
++    result = std::to_chars(buffer.data(), buffer.data() + buffer.size(), number.value,
++                           std::chars_format::general, std::numeric_limits<T>::max_digits10);
++  }
++  if (result.ec != std::errc()) out.setstate(std::ios::badbit);
++  else out.write(buffer.data(), static_cast<std::streamsize>(result.ptr - buffer.data()));
++  return out;
++}
++
++template <typename Next>
++void WriteUtf16(std::ostream& out, size_t length, Next next) {
++  std::array<char, 4096> buffer;
++  size_t used = 0;
++  constexpr char hex[] = "0123456789abcdef";
++  auto append = [&](char value) {
++    buffer[used++] = value;
++    if (used == buffer.size()) { out.write(buffer.data(), static_cast<std::streamsize>(used)); used = 0; }
++  };
++  append('"');
++  for (size_t i = 0; i < length; ++i) {
++    uint16_t ch = next();
++    if (ch == '"' || ch == '\\') { append('\\'); append(static_cast<char>(ch)); }
++    else if (ch >= 32 && ch < 127) append(static_cast<char>(ch));
++    else {
++      append('\\'); append('u');
++      append(hex[(ch >> 12) & 15]); append(hex[(ch >> 8) & 15]);
++      append(hex[(ch >> 4) & 15]); append(hex[ch & 15]);
++    }
++  }
++  append('"');
++  if (used) out.write(buffer.data(), static_cast<std::streamsize>(used));
++}
++
++inline std::string EncodeUtf16(std::u16string_view value) {
++  size_t cursor = 0;
++  std::ostringstream out;
++  WriteUtf16(out, value.size(), [&] { return static_cast<uint16_t>(value[cursor++]); });
++  return out.str();
++}
++
++}
++
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-node-ids.h
+@@ -0,0 +1,48 @@
++#ifndef V8_RUNTIME_V8TRACE_NODE_IDS_H_
++#define V8_RUNTIME_V8TRACE_NODE_IDS_H_
++
++#include <array>
++#include <cstdint>
++#include <optional>
++#include <unordered_map>
++
++namespace v8trace_snapshot {
++
++class NodeIds {
++ public:
++  uint32_t Find(uintptr_t address) const {
++    if (promoted_) {
++      auto found = promoted_->find(address);
++      return found == promoted_->end() ? 0 : found->second;
++    }
++    for (uint32_t i = 0; i < inline_size_; ++i) {
++      if (inline_nodes_[i].address == address) return inline_nodes_[i].id;
++    }
++    return 0;
++  }
++  uint32_t InsertNew(uintptr_t address) {
++    uint32_t id = size() + 1;
++    if (!promoted_ && inline_size_ < inline_nodes_.size()) {
++      inline_nodes_[inline_size_++] = {address, id};
++    } else {
++      if (!promoted_) {
++        promoted_.emplace();
++        promoted_->reserve(64);
++        for (uint32_t i = 0; i < inline_size_; ++i)
++          promoted_->emplace(inline_nodes_[i].address, inline_nodes_[i].id);
++      }
++      promoted_->emplace(address, id);
++    }
++    return id;
++  }
++  uint32_t size() const { return promoted_ ? static_cast<uint32_t>(promoted_->size()) : inline_size_; }
++
++ private:
++  struct Node { uintptr_t address; uint32_t id; };
++  std::array<Node, 8> inline_nodes_;
++  uint32_t inline_size_ = 0;
++  std::optional<std::unordered_map<uintptr_t, uint32_t>> promoted_;
++};
++
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-object-values.h
+@@ -0,0 +1,258 @@
++#ifndef V8_RUNTIME_V8TRACE_OBJECT_VALUES_H_
++#define V8_RUNTIME_V8TRACE_OBJECT_VALUES_H_
++
++#include <algorithm>
++#include <cstdlib>
++#include <string_view>
++#include "src/objects/dictionary-inl.h"
++#include "src/objects/js-array-inl.h"
++#include "src/objects/name-inl.h"
++#include "src/objects/struct-inl.h"
++#include "src/objects/swiss-name-dictionary-inl.h"
++#include "src/runtime/v8trace-values.h"
++#include "src/runtime/v8trace-node-ids.h"
++
++#ifdef V8_OS_WIN
++extern "C" __declspec(dllimport) wchar_t* __stdcall GetCommandLineW();
++#endif
++
++namespace v8::internal::v8trace {
++
++struct ObjectObservationConfig {
++  uint32_t depth, nodes, properties;
++  static uint32_t Read(const char* name, const wchar_t* flag, uint32_t maximum) {
++#ifdef V8_OS_WIN
++    std::wstring_view command(GetCommandLineW()), token(flag);
++    size_t position = command.find(token);
++    while (position != std::wstring_view::npos) {
++      if (!position || command[position - 1] == L' ' || command[position - 1] == L'\t' || command[position - 1] == L'"') {
++        size_t cursor = position + token.size(), start = cursor;
++        uint32_t number = 0;
++        while (cursor < command.size() && command[cursor] >= L'0' && command[cursor] <= L'9') {
++          uint32_t digit = command[cursor++] - L'0';
++          if (digit > maximum || number > (maximum - digit) / 10) return 0;
++          number = number * 10 + digit;
++        }
++        if (cursor == start || number > maximum || (cursor != command.size() && command[cursor] != L' ' && command[cursor] != L'\t' && command[cursor] != L'"')) return 0;
++        return number;
++      }
++      position = command.find(token, position + token.size());
++    }
++    return 0;
++#else
++    const char* value = std::getenv(name);
++    if (!value || !*value) return 0;
++    char* end = nullptr;
++    unsigned long number = std::strtoul(value, &end, 10);
++    return *end || number > maximum ? 0 : static_cast<uint32_t>(number);
++#endif
++  }
++  bool enabled() const { return depth && nodes && properties; }
++};
++
++inline const ObjectObservationConfig& ObservationConfig() {
++  static const ObjectObservationConfig config = {
++      ObjectObservationConfig::Read("V8_TRACE_OBJECT_DEPTH", L"--v8-trace-object-depth=", 8),
++      ObjectObservationConfig::Read("V8_TRACE_OBJECT_NODES", L"--v8-trace-object-nodes=", 4096),
++      ObjectObservationConfig::Read("V8_TRACE_OBJECT_PROPERTIES", L"--v8-trace-object-properties=", 65536)};
++  return config;
++}
++
++inline void ObservationConfigJson(std::ostream& out) {
++  const auto& config = ObservationConfig();
++  out << "{\"schema\":\"v8trace/objects/1\",\"enabled\":"
++      << (config.enabled() ? "true" : "false") << ",\"depth\":" << config.depth
++      << ",\"nodes\":" << config.nodes << ",\"properties\":" << config.properties
++      << ",\"scanLimit\":" << config.properties * 16
++      << ",\"invokesGetters\":false,\"invokesProxyTraps\":false}";
++}
++
++class ObjectObservation {
++ public:
++  explicit ObjectObservation(Isolate* isolate) : isolate_(isolate), config_(ObservationConfig()) {}
++  ObjectObservation(Isolate* isolate, const ObjectObservationConfig& config) : isolate_(isolate), config_(config) {}
++  void Write(std::ostream& out, Tagged<Object> value, uint32_t depth = 0) {
++    if (OutsideObjectCage(isolate_, value)) {
++      ExternalHeapReference(out, value);
++      return;
++    }
++    if (!IsHeapObject(value) || IsString(value) || IsNumber(value) ||
++        IsBigInt(value) || IsOddball(value) || IsTheHole(value)) {
++      Value(out, isolate_, value);
++      return;
++    }
++    auto heap = Cast<HeapObject>(value);
++    out << "{\"type\":\"heap-reference\",\"address\":";
++    Pointer(out, heap->address());
++    out << ",\"instanceType\":" << v8trace_json::Number(static_cast<unsigned>(heap->map()->instance_type()))
++        << ",\"identityScope\":\"address-at-observation\",\"snapshot\":{\"schema\":\"v8trace/objects/1\"";
++    uint32_t found = visited_.Find(heap->address());
++    if (found) {
++      out << ",\"refNodeId\":" << v8trace_json::Number(found) << "}}";
++      return;
++    }
++    if (depth > config_.depth || visited_.size() >= config_.nodes) {
++      out << ",\"coverage\":\"partial\",\"reason\":\""
++          << (depth > config_.depth ? "depth-budget" : "node-budget") << "\"}}";
++      return;
++    }
++    uint32_t id = visited_.InsertNew(heap->address());
++    out << ",\"nodeId\":" << v8trace_json::Number(id) << ",\"identityScope\":\"value-graph-at-observation\"";
++    if (IsSymbol(value)) {
++      out << ",\"kind\":\"symbol\",\"description\":";
++      Value(out, isolate_, Cast<Symbol>(value)->description());
++      out << ",\"coverage\":\"symbol-description\"}}";
++      return;
++    }
++    if (IsJSFunction(value)) {
++      auto shared = Cast<JSFunction>(value)->shared();
++      out << ",\"kind\":\"function\",\"name\":";
++      JsonString(out, shared->Name());
++      out << ",\"functionStart\":" << v8trace_json::Number(shared->StartPosition()) << ",\"scriptId\":";
++      if (IsScript(shared->script())) out << v8trace_json::Number(Cast<Script>(shared->script())->id()); else out << "null";
++      out << ",\"apiFunction\":" << (shared->IsApiFunction() ? "true" : "false")
++          << ",\"coverage\":\"function-metadata\"}}";
++      return;
++    }
++    if (IsJSProxy(value)) {
++      out << ",\"kind\":\"proxy\",\"coverage\":\"opaque\",\"reason\":\"proxy-not-invoked\"}}";
++      return;
++    }
++    auto type = heap->map()->instance_type();
++    if (type != JS_OBJECT_TYPE && type != JS_ARRAY_TYPE) {
++      out << ",\"coverage\":\"opaque\",\"reason\":\"internal-or-host-object\"}}";
++      return;
++    }
++    auto object = Cast<JSObject>(value);
++    auto map = object->map();
++    if (map->has_named_interceptor() || map->has_indexed_interceptor() || map->is_access_check_needed()) {
++      out << ",\"coverage\":\"opaque\",\"reason\":\"interceptor-or-access-check\"}}";
++      return;
++    }
++    out << ",\"kind\":\"" << (IsJSArray(value) ? "array" : "object") << "\",\"prototype\":";
++    Value(out, isolate_, map->prototype());
++    if (IsJSArray(value)) { out << ",\"length\":"; Value(out, isolate_, Cast<JSArray>(value)->length()); }
++    out << ",\"ownProperties\":[";
++    bool comma = false, complete = true;
++    if (object->HasFastProperties()) {
++      auto descriptors = map->instance_descriptors();
++      for (InternalIndex i : map->IterateOwnDescriptors()) {
++        if (!Consume()) { complete = false; break; }
++        auto details = descriptors->GetDetails(i);
++        auto field = details.location() == PropertyLocation::kField
++            ? object->RawFastPropertyAt(FieldIndex::ForDetails(map, details))
++            : descriptors->GetStrongValue(i);
++        Property(out, descriptors->GetKey(i), field, details, depth, comma);
++      }
++    } else if constexpr (V8_ENABLE_SWISS_NAME_DICTIONARY_BOOL) {
++      auto dictionary = object->property_dictionary_swiss();
++      for (InternalIndex i : dictionary->IterateEntries()) {
++        if (!Scan()) { complete = false; break; }
++        auto key = dictionary->KeyAt(i);
++        if (!IsName(key)) continue;
++        if (!Consume()) { complete = false; break; }
++        Property(out, key, dictionary->ValueAt(i), dictionary->DetailsAt(i), depth, comma);
++      }
++    } else {
++      auto dictionary = object->property_dictionary();
++      for (InternalIndex i : dictionary->IterateEntries()) {
++        if (!Scan()) { complete = false; break; }
++        Tagged<Object> key;
++        if (!dictionary->ToKey(i, &key)) continue;
++        if (!Consume()) { complete = false; break; }
++        Property(out, key, dictionary->ValueAt(i), dictionary->DetailsAt(i), depth, comma);
++      }
++    }
++    out << "],\"elementsKind\":" << v8trace_json::Number(static_cast<int>(object->GetElementsKind())) << ",\"elements\":[";
++    comma = false;
++    auto elements = object->elements();
++    if (IsFixedArrayExact(elements)) {
++      auto array = Cast<FixedArray>(elements);
++      uint32_t length = array->length().value();
++      if (IsJSArray(value) && IsSmi(Cast<JSArray>(value)->length()))
++        length = std::min(length, static_cast<uint32_t>(Cast<Smi>(Cast<JSArray>(value)->length()).value()));
++      for (uint32_t i = 0; i < length; ++i) {
++        if (!Scan()) { complete = false; break; }
++        auto element = array->get(i);
++        if (IsTheHole(element)) continue;
++        if (!Consume()) { complete = false; break; }
++        if (comma) out << ','; comma = true;
++        out << "{\"index\":" << v8trace_json::Number(i) << ",\"value\":";
++        Write(out, element, depth + 1); out << '}';
++      }
++    } else if (IsFixedDoubleArray(elements)) {
++      auto array = Cast<FixedDoubleArray>(elements);
++      uint32_t length = array->length().value();
++      if (IsJSArray(value) && IsSmi(Cast<JSArray>(value)->length()))
++        length = std::min(length, static_cast<uint32_t>(Cast<Smi>(Cast<JSArray>(value)->length()).value()));
++      for (uint32_t i = 0; i < length; ++i) {
++        if (!Scan()) { complete = false; break; }
++        if (array->is_the_hole(i)) continue;
++        if (!Consume()) { complete = false; break; }
++        if (comma) out << ','; comma = true;
++        #ifdef V8_ENABLE_UNDEFINED_DOUBLE
++        if (array->is_undefined(i)) {
++          out << "{\"index\":" << v8trace_json::Number(i) << ",\"value\":{\"type\":\"undefined\"}}";
++          continue;
++        }
++        #endif
++        out << "{\"index\":" << v8trace_json::Number(i) << ",\"value\":{\"type\":\"number\",\"value\":";
++        double number = array->get_scalar(i);
++        if (std::isnan(number)) out << "\"NaN\"";
++        else if (!std::isfinite(number)) out << (number < 0 ? "\"-Infinity\"" : "\"Infinity\"");
++        else if (number == 0 && std::signbit(number)) out << "\"-0\"";
++        else out << std::setprecision(17) << v8trace_json::Number(number);
++        out << "}}";
++      }
++    } else if (IsNumberDictionary(elements)) {
++      auto dictionary = Cast<NumberDictionary>(elements);
++      for (InternalIndex i : dictionary->IterateEntries()) {
++        if (!Scan()) { complete = false; break; }
++        Tagged<Object> key;
++        if (!dictionary->ToKey(i, &key)) continue;
++        if (!Consume()) { complete = false; break; }
++        Property(out, key, dictionary->ValueAt(i), dictionary->DetailsAt(i), depth, comma);
++      }
++    } else if (elements->length().value()) {
++      complete = false;
++      out << "{\"coverage\":\"opaque\",\"reason\":\"exotic-elements\"}";
++    }
++    out << "],\"ownStorageCoverage\":\"" << (complete ? "complete" : "partial")
++        << "\",\"coverage\":\"own-storage-only\",\"prototypeExpanded\":false,\"internalSlotsExpanded\":false";
++    if (!complete) out << ",\"reason\":\"property-or-scan-budget-or-exotic-elements\"";
++    out << "}}";
++  }
++
++ private:
++  bool Consume() { return properties_++ < config_.properties; }
++  bool Scan() { return scans_++ < config_.properties * 16; }
++  void Property(std::ostream& out, Tagged<Object> key, Tagged<Object> value,
++                PropertyDetails details, uint32_t depth, bool& comma) {
++    if (comma) out << ','; comma = true;
++    out << "{\"key\":"; Write(out, key, depth + 1);
++    out << ",\"attributes\":" << v8trace_json::Number(static_cast<int>(details.attributes()))
++        << ",\"kind\":\"" << (details.kind() == PropertyKind::kData ? "data" : "accessor") << '\"';
++    if (details.kind() == PropertyKind::kAccessor && IsAccessorPair(value)) {
++      auto pair = Cast<AccessorPair>(value);
++      out << ",\"getter\":"; Write(out, pair->getter(), depth + 1);
++      out << ",\"setter\":"; Write(out, pair->setter(), depth + 1);
++      out << ",\"invoked\":false";
++    } else if (details.kind() == PropertyKind::kAccessor && IsAccessorInfo(value)) {
++      out << ",\"nativeDescriptorObservation\":\"identity-only\",\"invoked\":false,\"value\":";
++      Value(out, isolate_, value);
++    } else { out << ",\"value\":"; Write(out, value, depth + 1); }
++    out << '}';
++  }
++  Isolate* isolate_;
++  const ObjectObservationConfig& config_;
++  v8trace_snapshot::NodeIds visited_;
++  uint32_t properties_ = 0, scans_ = 0;
++};
++
++inline void ObservedValue(std::ostream& out, Isolate* isolate, Tagged<Object> value) {
++  if (!ObservationConfig().enabled()) { Value(out, isolate, value); return; }
++  DisallowGarbageCollection no_gc;
++  ObjectObservation(isolate).Write(out, value);
++}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-opcode.h
+@@ -0,0 +1,42 @@
++#ifndef V8_RUNTIME_V8TRACE_OPCODE_H_
++#define V8_RUNTIME_V8TRACE_OPCODE_H_
++#include "src/runtime/v8trace-values.h"
++#include "src/runtime/v8trace-sha256.h"
++namespace v8::internal::v8trace {
++inline std::string BytecodeIdentity(Tagged<BytecodeArray> bytes) {
++  using interpreter::Bytecode;
++  using interpreter::Bytecodes;
++  using interpreter::OperandScale;
++  v8trace_sha256::Hash hash;
++  for (int offset = 0; offset < bytes->length();) {
++    auto raw = bytes->get(offset);
++    if (raw > static_cast<uint8_t>(Bytecode::kLast)) return {};
++    auto opcode = Bytecodes::FromByte(raw);
++    auto scale = OperandScale::kSingle;
++    if (Bytecodes::IsPrefixScalingBytecode(opcode)) {
++      scale = Bytecodes::PrefixBytecodeToOperandScale(opcode);
++      hash.Add(raw);
++      if (++offset >= bytes->length()) return {};
++      raw = bytes->get(offset);
++      if (raw > static_cast<uint8_t>(Bytecode::kLast)) return {};
++      opcode = Bytecodes::FromByte(raw);
++      if (Bytecodes::IsPrefixScalingBytecode(opcode)) return {};
++    }
++    int size = Bytecodes::Size(opcode, scale);
++    if (size <= 0 || size > bytes->length() - offset) return {};
++    for (int i = 0; i < size; ++i) {
++      bool feedback = false;
++      for (int n = 0; n < Bytecodes::NumberOfOperands(opcode); ++n)
++        if (Bytecodes::GetOperandType(opcode, n) == interpreter::OperandType::kEmbeddedFeedback &&
++            Bytecodes::GetOperandOffset(opcode, n, scale) == i) feedback = true;
++      // Embedded feedback changes during execution; raw Opcode bytes stay intact.
++      hash.Add(feedback ? 0 : bytes->get(offset + i));
++    }
++    offset += size;
++  }
++  return hash.Finish();
++}
++inline void Record(Isolate*, UnoptimizedJSFrame*, Handle<BytecodeArray>,
++                   interpreter::BytecodeArrayIterator&, int, Handle<Object>, bool) {}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-sha256.h
+@@ -0,0 +1,30 @@
++#ifndef V8_RUNTIME_V8TRACE_SHA256_H_
++#define V8_RUNTIME_V8TRACE_SHA256_H_
++#include <array>
++#include <bit>
++#include <cstdint>
++#include <string>
++namespace v8trace_sha256 {
++class Hash {
++ public:
++  void Add(uint8_t byte) { block_[used_++] = byte; ++bytes_; if (used_ == 64) { Transform(); used_ = 0; } }
++  std::string Finish() {
++    auto bits = bytes_ * 8; Add(128); while (used_ != 56) Add(0); for (int shift = 56; shift >= 0; shift -= 8) Add(uint8_t(bits >> shift));
++    constexpr char hex[] = "0123456789abcdef"; std::string result; result.reserve(64); for (auto value : state_) for (int shift = 28; shift >= 0; shift -= 4) result += hex[(value >> shift) & 15]; return result;
++  }
++ private:
++  void Transform() {
++    static constexpr std::array<uint32_t, 64> k{0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2};
++    std::array<uint32_t, 64> words; for (size_t i = 0; i < 16; ++i) words[i] = uint32_t(block_[i * 4]) << 24 | uint32_t(block_[i * 4 + 1]) << 16 | uint32_t(block_[i * 4 + 2]) << 8 | block_[i * 4 + 3];
++    for (size_t i = 16; i < 64; ++i) { auto a = words[i - 15], b = words[i - 2]; words[i] = words[i - 16] + (std::rotr(a, 7) ^ std::rotr(a, 18) ^ (a >> 3)) + words[i - 7] + (std::rotr(b, 17) ^ std::rotr(b, 19) ^ (b >> 10)); }
++    auto [a,b,c,d,e,f,g,h] = state_;
++    for (size_t i = 0; i < 64; ++i) { auto first = h + (std::rotr(e, 6) ^ std::rotr(e, 11) ^ std::rotr(e, 25)) + ((e & f) ^ (~e & g)) + k[i] + words[i]; auto second = (std::rotr(a, 2) ^ std::rotr(a, 13) ^ std::rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c)); h=g; g=f; f=e; e=d+first; d=c; c=b; b=a; a=first+second; }
++    state_[0]+=a; state_[1]+=b; state_[2]+=c; state_[3]+=d; state_[4]+=e; state_[5]+=f; state_[6]+=g; state_[7]+=h;
++  }
++  std::array<uint32_t, 8> state_{0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19};
++  std::array<uint8_t, 64> block_{};
++  size_t used_ = 0;
++  uint64_t bytes_ = 0;
++};
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-values.h
+@@ -0,0 +1,100 @@
++#ifndef V8_RUNTIME_V8TRACE_VALUES_H_
++#define V8_RUNTIME_V8TRACE_VALUES_H_
++
++#include <cmath>
++#include <iomanip>
++#include <locale>
++#include <sstream>
++#include <vector>
++
++#include "src/common/ptr-compr-inl.h"
++#include "src/debug/debug.h"
++#include "src/execution/isolate.h"
++#include "src/objects/bigint.h"
++#include "src/objects/contexts-inl.h"
++#include "src/objects/js-function-inl.h"
++#include "src/objects/script-inl.h"
++#include "src/objects/string-inl.h"
++#include "src/tracing/trace-event.h"
++#include "src/runtime/v8trace-json.h"
++
++namespace v8::internal {
++namespace v8trace {
++
++inline void JsonString(std::ostream& out, Tagged<String> value) {
++  DisallowGarbageCollection no_gc;
++  StringCharacterStream stream(value);
++  v8trace_json::WriteUtf16(out, value->length(), [&] { return stream.GetNext(); });
++}
++
++inline void Pointer(std::ostream& out, Address value) {
++  out << '"' << v8trace_json::Hex(value) << '"';
++}
++
++inline bool OutsideObjectCage(Isolate* isolate, Tagged<Object> value) {
++#ifdef V8_COMPRESS_POINTERS
++  return !HAS_SMI_TAG(value.ptr()) &&
++         (value.ptr() & kPtrComprCageBaseMask) != isolate->cage_base();
++#else
++  return false;
++#endif
++}
++
++inline void ExternalHeapReference(std::ostream& out, Tagged<Object> value) {
++  out << "{\"type\":\"heap-reference\",\"address\":";
++  Pointer(out, value.ptr() - kHeapObjectTag);
++  out << ",\"identityScope\":\"address-at-observation\",\"snapshot\":{"
++         "\"schema\":\"v8trace/objects/1\",\"coverage\":\"opaque\","
++         "\"reason\":\"outside-main-compression-cage\"}}";
++}
++
++inline void Value(std::ostream& out, Isolate* isolate, Tagged<Object> value) {
++  if (OutsideObjectCage(isolate, value)) {
++    ExternalHeapReference(out, value);
++    return;
++  }
++  ReadOnlyRoots roots(isolate);
++  if (IsString(value)) {
++    out << "{\"type\":\"string\",\"value\":";
++    JsonString(out, Cast<String>(value));
++    out << '}';
++  } else if (IsNumber(value)) {
++    double number = Object::NumberValue(value);
++    out << "{\"type\":\"number\",\"value\":";
++    if (std::isnan(number)) out << "\"NaN\"";
++    else if (!std::isfinite(number)) out << (number < 0 ? "\"-Infinity\"" : "\"Infinity\"");
++    else if (number == 0 && std::signbit(number)) out << "\"-0\"";
++    else out << std::setprecision(17) << v8trace_json::Number(number);
++    out << '}';
++  } else if (value == roots.true_value() || value == roots.false_value()) {
++    out << "{\"type\":\"boolean\",\"value\":"
++        << (value == roots.true_value() ? "true}" : "false}");
++  } else if (value == roots.undefined_value() || value == roots.null_value() ||
++             value == roots.the_hole_value()) {
++    out << "{\"type\":\"" << (value == roots.undefined_value() ? "undefined" :
++        value == roots.null_value() ? "null" : "hole") << "\"}";
++  } else if (IsBigInt(value)) {
++    auto bigint = Cast<BigInt>(value);
++    uint32_t count = bigint->Words64Count();
++    std::vector<uint64_t> words(count);
++    int sign = 0;
++    bigint->ToWordsArray64(&sign, &count, words.data());
++    out << "{\"type\":\"bigint\",\"negative\":" << (sign ? "true" : "false")
++        << ",\"digitBits\":64,\"digitsHex\":[";
++    for (uint32_t i = 0; i < count; ++i) {
++      if (i) out << ',';
++      out << '"' << v8trace_json::Hex(words[i]) << '"';
++    }
++    out << "],\"endianness\":\"least-significant-digit-first\"}";
++  } else {
++    out << "{\"type\":\"heap-reference\",\"address\":";
++    Pointer(out, Cast<HeapObject>(value)->address());
++    out << ",\"instanceType\":" << v8trace_json::Number(static_cast<unsigned>(Cast<HeapObject>(value)->map()->instance_type()))
++        << ",\"identityScope\":\"address-at-observation\"}";
++  }
++}
++
++
++}  // namespace v8trace
++}  // namespace v8::internal
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-vmp-inl.h
+@@ -0,0 +1,10 @@
++#ifndef V8_RUNTIME_V8TRACE_VMP_INL_H_
++#define V8_RUNTIME_V8TRACE_VMP_INL_H_
++#include "src/runtime/v8trace-aux.h"
++namespace v8::internal::v8trace {
++bool VmpConfigValid() { return false; }
++void VmpInstruction(Isolate*, UnoptimizedJSFrame*, interpreter::BytecodeArrayIterator&, int, Tagged<Object>, bool) {}
++void VmpException(Isolate*, Tagged<Object>) {}
++void VmpIsolateDispose(Isolate*) {}
++}
++#endif
+--- /dev/null
++++ b/src/runtime/v8trace-x64.inc
+@@ -0,0 +1,58 @@
++void GenerateV8TraceNativeReturn(MacroAssembler* masm) {
++#ifdef V8_TARGET_OS_WIN
++  Label done;
++  __ cmpb(__ ExternalReferenceAsOperand(
++              ExternalReference::address_of_v8trace_native_flag(), r11), Immediate(0));
++  __ j(equal, &done);
++  __ Push(rax); __ Push(rdi); __ Push(rdx); __ Push(rsi); __ Push(rbx);
++  {
++    FrameScope scope(masm, StackFrame::MANUAL);
++    __ PrepareCallCFunction(7);
++    __ movq(Operand(rsp, 4 * kSystemPointerSize), rbp);
++    __ movq(Operand(rsp, 5 * kSystemPointerSize), Immediate(0));
++    __ movq(Operand(rsp, 6 * kSystemPointerSize), Immediate(2));
++    __ Move(kCArgRegs[0], ExternalReference::isolate_address());
++    __ Move(kCArgRegs[1], rax);
++    __ Move(kCArgRegs[2], Immediate(0));
++    __ Move(kCArgRegs[3], Immediate(0));
++    __ CallCFunction(ExternalReference::v8trace_native_js_entry(), 7);
++  }
++  __ Pop(rbx); __ Pop(rsi); __ Pop(rdx); __ Pop(rdi); __ Pop(rax);
++  __ bind(&done);
++#endif
++}
++
++void GenerateV8TraceNativeEntry(MacroAssembler* masm, bool construct) {
++#ifdef V8_TARGET_OS_WIN
++  Label done;
++  __ cmpb(__ ExternalReferenceAsOperand(
++              ExternalReference::address_of_v8trace_native_flag(), r11),
++          Immediate(0));
++  __ j(equal, &done);
++  __ Push(rax);
++  __ Push(rdi);
++  __ Push(rdx);
++  __ Push(rsi);
++  __ Push(rbx);
++  __ leaq(rbx, Operand(rsp, 6 * kSystemPointerSize));
++  {
++    FrameScope scope(masm, StackFrame::MANUAL);
++    __ PrepareCallCFunction(7);
++    __ movq(Operand(rsp, 4 * kSystemPointerSize), rbp);
++    if (construct) __ movq(Operand(rsp, 5 * kSystemPointerSize), rdx);
++    else __ movq(Operand(rsp, 5 * kSystemPointerSize), Immediate(0));
++    __ movq(Operand(rsp, 6 * kSystemPointerSize), Immediate(construct ? 1 : 0));
++    __ Move(kCArgRegs[0], ExternalReference::isolate_address());
++    __ Move(kCArgRegs[1], rdi);
++    __ Move(kCArgRegs[2], rax);
++    __ Move(kCArgRegs[3], rbx);
++    __ CallCFunction(ExternalReference::v8trace_native_js_entry(), 7);
++  }
++  __ Pop(rbx);
++  __ Pop(rsi);
++  __ Pop(rdx);
++  __ Pop(rdi);
++  __ Pop(rax);
++  __ bind(&done);
++#endif
++}
+--- a/src/tracing/trace-categories.h
++++ b/src/tracing/trace-categories.h
+@@ -19,6 +19,14 @@
+     v8, V8_EXPORT_PRIVATE, perfetto::Category("cppgc"),
+     perfetto::Category("v8"), perfetto::Category("v8.console"),
+     perfetto::Category("v8.execute"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.aux")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.vmp")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.wasm-module")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.envprobe")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.jscall")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.native")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.wasm")).SetTags("slow"),
++    perfetto::Category(TRACE_DISABLED_BY_DEFAULT("v8.opcode")).SetTags("slow"),
+     perfetto::Category("v8.memory")
+         .SetDescription("Emits counters related to v8 memory usage."),
+     perfetto::Category("v8.wasm"),
+--- a/src/tracing/tracing-category-observer.cc
++++ b/src/tracing/tracing-category-observer.cc
+@@ -9,6 +9,11 @@
+ #include "src/logging/counters.h"
+ #include "src/logging/tracing-flags.h"
+ #include "src/tracing/trace-event.h"
++#ifdef V8_TRACE_UNOPTIMIZED
++#include "src/runtime/v8trace-detail.h"
++#include "src/runtime/v8trace-env.h"
++#include "src/runtime/v8trace-aux.h"
++#endif
+ 
+ namespace v8 {
+ namespace tracing {
+@@ -28,6 +33,11 @@
+ }
+ 
+ void TracingCategoryObserver::TearDown() {
++#if defined(V8_TRACE_UNOPTIMIZED) && defined(V8_USE_PERFETTO)
++  i::v8trace::DetailSessionShutdown();
++  i::v8trace::EnvSessionShutdown();
++  i::v8trace::AuxSessionShutdown();
++#endif
+ #if defined(V8_USE_PERFETTO)
+   TrackEvent::RemoveSessionObserver(TracingCategoryObserver::instance_);
+ #else
+@@ -39,9 +49,14 @@
+ 
+ #if defined(V8_USE_PERFETTO)
+ void TracingCategoryObserver::OnStart(
+-    const perfetto::DataSourceBase::StartArgs&) {
++    const perfetto::DataSourceBase::StartArgs& args) {
+ #else
+ void TracingCategoryObserver::OnTraceEnabled() {
++#endif
++#if defined(V8_TRACE_UNOPTIMIZED) && defined(V8_USE_PERFETTO)
++  i::v8trace::DetailSessionStart(args.internal_instance_index);
++  i::v8trace::EnvSessionStart(args.internal_instance_index);
++  i::v8trace::AuxSessionStart(args.internal_instance_index);
+ #endif
+   bool enabled = false;
+   TRACE_EVENT_CATEGORY_GROUP_ENABLED(
+@@ -84,9 +99,14 @@
+ 
+ #if defined(V8_USE_PERFETTO)
+ void TracingCategoryObserver::OnStop(
+-    const perfetto::DataSourceBase::StopArgs&) {
++    const perfetto::DataSourceBase::StopArgs& args) {
+ #else
+ void TracingCategoryObserver::OnTraceDisabled() {
++#endif
++#if defined(V8_TRACE_UNOPTIMIZED) && defined(V8_USE_PERFETTO)
++  i::v8trace::DetailSessionStop(args.internal_instance_index);
++  i::v8trace::EnvSessionStop(args.internal_instance_index);
++  i::v8trace::AuxSessionStop(args.internal_instance_index);
+ #endif
+   i::TracingFlags::runtime_stats.fetch_and(
+       ~(ENABLED_BY_TRACING | ENABLED_BY_SAMPLING), std::memory_order_relaxed);
+--- a/src/wasm/streaming-decoder.cc
++++ b/src/wasm/streaming-decoder.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/wasm/streaming-decoder.h"
++#include "src/runtime/v8trace-aux.h"
+ 
+ #include <optional>
+ #include <span>
+@@ -43,6 +44,9 @@
+   void Abort() override;
+ 
+   void NotifyCompilationStopped() override {
++    if (stream_state_ == StreamState::kReceivingBytes && v8trace::AuxEnabled("wasm-module")) {
++      auto id=v8trace::AuxId();uint64_t offset=0;for(const auto& bytes:full_wire_bytes_){v8trace::WasmPrefix(id,offset,base::VectorOf(bytes));offset+=bytes.size();}v8trace::WasmPrefixEnd(id,offset,url());
++    }
+     // This is safe to happen in pretty much any state.
+     // Update `kReceivingBytes` to `kDiscarded`, but keep `kAborted` or
+     // `kFinished`.
+@@ -391,6 +395,8 @@
+     bytes_copy = std::move(all_bytes);
+   }
+ 
++  v8trace::WasmInput(nullptr, bytes_copy.as_vector(), "stream-finish-input", 0, url());
++
+   // If we have a caching callback, then get the serialized module now via the
+   // callback and try to deserialize it.
+   if (ok() && caching_callback) {
+@@ -466,6 +472,11 @@
+ }
+ 
+ void AsyncStreamingDecoder::Abort() {
++  if (stream_state_ == StreamState::kReceivingBytes && v8trace::AuxEnabled("wasm-module")) {
++    auto id = v8trace::AuxId(); uint64_t offset = 0;
++    for (const auto& bytes : full_wire_bytes_) { v8trace::WasmPrefix(id, offset, base::VectorOf(bytes)); offset += bytes.size(); }
++    v8trace::WasmPrefixEnd(id, offset, url());
++  }
+   TRACE_STREAMING("Abort\n");
+   // {Abort} is safe to happen in pretty much any state.
+   stream_state_ = StreamState::kAborted;
+--- a/src/wasm/wasm-code-manager.cc
++++ b/src/wasm/wasm-code-manager.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/wasm/wasm-code-manager.h"
++#include "src/runtime/v8trace-aux.h"
+ 
+ #include <algorithm>
+ #include <iomanip>
+@@ -1993,6 +1994,7 @@
+ }  // namespace
+ 
+ void NativeModule::SetWireBytes(base::OwnedVector<const uint8_t> wire_bytes) {
++  if (v8trace::AuxEnabled("wasm-module")) v8trace::WasmInput(nullptr, wire_bytes.as_vector(), "native-module-storage", V8TraceId());
+   auto shared_wire_bytes =
+       std::make_shared<base::OwnedVector<const uint8_t>>(std::move(wire_bytes));
+   std::atomic_store(&wire_bytes_, shared_wire_bytes);
+--- a/src/wasm/wasm-code-manager.h
++++ b/src/wasm/wasm-code-manager.h
+@@ -10,6 +10,7 @@
+ #endif  // !V8_ENABLE_WEBASSEMBLY
+ 
+ #include <atomic>
++#include "src/runtime/v8trace-aux.h"
+ #include <map>
+ #include <memory>
+ #include <set>
+@@ -781,6 +782,14 @@
+   base::Vector<const uint8_t> wire_bytes() const V8_LIFETIME_BOUND {
+     return std::atomic_load(&wire_bytes_)->as_vector();
+   }
++  uint64_t V8TraceId() const {
++    uint64_t id = v8trace_id_.load();
++    if (!id) { auto next = v8trace::AuxId(); if (v8trace_id_.compare_exchange_strong(id, next)) id = next; }
++    return id;
++  }
++ private:
++  mutable std::atomic<uint64_t> v8trace_id_{0};
++ public:
+   const WasmModule* module() const V8_LIFETIME_BOUND { return module_.get(); }
+   std::shared_ptr<const WasmModule> shared_module() const { return module_; }
+   size_t committed_code_space() const {
+--- a/src/wasm/wasm-engine.cc
++++ b/src/wasm/wasm-engine.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/wasm/wasm-engine.h"
++#include "src/runtime/v8trace-aux.h"
+ 
+ #include <optional>
+ 
+@@ -674,7 +675,10 @@
+     CompileTimeImports compile_imports, ErrorThrower* thrower,
+     base::OwnedVector<const uint8_t> bytes,
+     base::Vector<const char> source_url) {
++  uint64_t trace_attempt = 0;
++  auto trace_result = [&]() -> MaybeDirectHandle<WasmModuleObject> {
+   int compilation_id = next_compilation_id_.fetch_add(1);
++  trace_attempt = v8trace::WasmInput(isolate, bytes.as_vector(), "sync-compile-input", 0, std::string_view(source_url.begin(), source_url.size()), compilation_id);
+   TRACE_EVENT("v8.wasm", "wasm.SyncCompile", "id", compilation_id);
+   v8::metrics::Recorder::ContextId context_id =
+       isolate->GetOrRegisterRecorderContextId(isolate->native_context());
+@@ -739,6 +743,10 @@
+   // Finish the Wasm script now and make it public to the debugger.
+   isolate->debug()->OnAfterCompile(script);
+   return module_object;
++
++  }();
++  if (trace_attempt) { DirectHandle<WasmModuleObject> module; bool success = trace_result.ToHandle(&module); v8trace::WasmResult(isolate, trace_attempt, success, success ? module->native_module()->V8TraceId() : 0, thrower->error_msg()); }
++  return trace_result;
+ }
+ 
+ MaybeDirectHandle<WasmInstanceObject> WasmEngine::SyncInstantiate(
+@@ -795,6 +803,7 @@
+     base::OwnedVector<const uint8_t> bytes,
+     const char* api_method_name_for_errors) {
+   int compilation_id = next_compilation_id_.fetch_add(1);
++  v8trace::WasmInput(isolate, bytes.as_vector(), "async-compile-input", 0, {}, compilation_id);
+   TRACE_EVENT("v8.wasm", "wasm.AsyncCompile", "id", compilation_id);
+ 
+   if (!v8_flags.wasm_async_compilation || v8_flags.wasm_jitless) {
+--- a/src/wasm/wasm-js.cc
++++ b/src/wasm/wasm-js.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "src/wasm/wasm-js.h"
++#include "src/runtime/v8trace-aux.h"
+ 
+ #include <cinttypes>
+ #include <cstring>
+@@ -330,19 +331,24 @@
+             array->ByteOffset();
+     length = array->ByteLength();
+   } else {
++    i::v8trace::WasmRejected(reinterpret_cast<i::Isolate*>(info.GetIsolate()), "non-buffer-source");
+     thrower->TypeError("Argument 0 must be a buffer source");
+     return {};
+   }
+   DCHECK_IMPLIES(length, start != nullptr);
+   if (length == 0) {
++    auto trace=i::v8trace::WasmInput(reinterpret_cast<i::Isolate*>(info.GetIsolate()), {}, "api-empty-buffer");
+     thrower->CompileError("BufferSource argument is empty");
++    i::v8trace::WasmResult(reinterpret_cast<i::Isolate*>(info.GetIsolate()),trace,false,0,thrower->error_msg());
+     return {};
+   }
+   if (length > max_length) {
++    auto trace=i::v8trace::WasmArgument(reinterpret_cast<i::Isolate*>(info.GetIsolate()),start,length,"api-size-rejected-buffer");
+     // The spec requires a CompileError for implementation-defined limits, see
+     // https://webassembly.github.io/spec/js-api/index.html#limits.
+     thrower->CompileError("buffer source exceeds maximum size of %zu (is %zu)",
+                           max_length, length);
++    i::v8trace::WasmResult(reinterpret_cast<i::Isolate*>(info.GetIsolate()),trace,false,0,thrower->error_msg());
+     return {};
+   }
+ 
+@@ -351,6 +357,7 @@
+   auto result = base::OwnedVector<uint8_t>::NewForOverwrite(length);
+   base::Relaxed_Memcpy(reinterpret_cast<base::Atomic8*>(result.begin()),
+                        reinterpret_cast<const base::Atomic8*>(start), length);
++  i::v8trace::WasmInput(reinterpret_cast<i::Isolate*>(info.GetIsolate()),base::VectorOf(static_cast<const uint8_t*>(result.begin()),result.size()),"api-copied-buffer");
+   return result;
+ }
+ 

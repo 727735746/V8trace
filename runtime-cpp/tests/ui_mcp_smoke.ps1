@@ -49,7 +49,7 @@ public static class McpUiSmoke {
                 Check((DateTime.UtcNow-start).TotalSeconds<45,"UI deadline; status="+Find<Label>("McpStatus").Text);
                 var service=(McpService)Field("mcpService");
                 if(stage==0&&(bool)Field("ready")){
-                    Find<TabControl>("EvidenceTabs").SelectedTab=Find<TabPage>("McpTab");Check(!service.Active,"MCP must not auto-start");Check(Find<TextBox>("McpSourceRoot").Text==@".\logs","Portable source default");Find<NumericUpDown>("McpPort").Value=port;
+                    Find<TabControl>("WorkspaceTabs").SelectedTab=Find<TabPage>("McpTab");Check(!service.Active,"MCP must not auto-start");Check(Find<TextBox>("McpSourceRoot").Text==@".\logs","Portable source default");Find<NumericUpDown>("McpPort").Value=port;
                     string index=Path.Combine(root,"mcp","index");while(index.Length<420)index=Path.Combine(index,"中文 深层索引原路径-0123456789");Find<TextBox>("McpIndexRoot").Text=index;
                     var configuration=(Dictionary<string,object>)Invoke("McpClientConfiguration","stdio");var servers=(Dictionary<string,object>)configuration["mcpServers"];var item=(Dictionary<string,object>)servers["v8trace"];Check((string)item["command"]==Path.Combine(root,"runtime","v8trace-runtime.exe"),"Stdio command at current package location");Check(((string[])item["args"])[4]==Path.Combine(root,"logs"),"Relative source rooted at software directory");Check(((string[])item["args"])[6]==index+"-stdio","UI keeps full ordinary long index path");
                     Snapshot("mcp-idle-1280.png");Find<Button>("McpStartButton").PerformClick();Check(service.Active,"MCP process started independently");stage=1;
