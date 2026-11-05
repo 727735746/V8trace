@@ -172,7 +172,7 @@ void publish(const fs::path& temporary, const fs::path& destination, bool overwr
 }
 Json Source::identity() const { return {{"size", size}, {"modified", modified}, {"fileId", file_id}, {"pathHash", path_hash}, {"sampleHash", sample_hash}}; }
 void Source::verify(bool samples) const {
-  require(fs::is_regular_file(file) && fs::file_size(file) == size && fs::last_write_time(file).time_since_epoch().count() == modified && file_identity(file) == file_id, "Source file changed; reopen an immutable snapshot");
+  require(fs::is_regular_file(file) && fs::file_size(file) == size && int64_t(fs::last_write_time(file).time_since_epoch().count()) == modified && file_identity(file) == file_id, "Source file changed; reopen an immutable snapshot");
   if (samples) require(sample(file, size) == sample_hash, "Source file samples changed; rebuild index");
 }
 Source inspect_source(const fs::path& file, const fs::path& allowed_root) {
@@ -181,7 +181,7 @@ Source inspect_source(const fs::path& file, const fs::path& allowed_root) {
 #ifdef _WIN32
   name = lower(name);
 #endif
-  Source result{resolved, fs::file_size(resolved), fs::last_write_time(resolved).time_since_epoch().count(), file_identity(resolved), sha256(name), {}};
+  Source result{resolved, fs::file_size(resolved), int64_t(fs::last_write_time(resolved).time_since_epoch().count()), file_identity(resolved), sha256(name), {}};
   require(result.size <= uint64_t(std::numeric_limits<int64_t>::max()), "Source exceeds stream offset range");
   result.sample_hash = sample(resolved, result.size); result.verify(); return result;
 }

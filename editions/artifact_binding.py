@@ -5,6 +5,7 @@ import os
 from pathlib import Path, PurePosixPath
 import stat
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -26,6 +27,16 @@ def object_digest(value):
     return hashlib.sha256(canonical(value)).hexdigest()
 
 
+def system_link(part):
+    """Allow only the fixed macOS top-level aliases (/var, /tmp, /etc)."""
+    if sys.platform != 'darwin' or part.parent != Path('/') or part.name not in ('var', 'tmp', 'etc'):
+        return False
+    try:
+        return Path(os.path.realpath(part)) == Path('/private') / part.name
+    except OSError:
+        return False
+
+
 def plain_path(value, *, exists=True):
     value = Path(value)
     require('..' not in value.parts and '\0' not in str(value), 'Parent traversal or NUL path rejected')
@@ -35,7 +46,8 @@ def plain_path(value, *, exists=True):
             info = part.lstat()
         except FileNotFoundError:
             continue
-        require(not stat.S_ISLNK(info.st_mode) and not getattr(info, 'st_file_attributes', 0) & 0x400, 'Reparse/symlink path rejected: ' + str(part))
+        if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+            require(system_link(part), 'Reparse/symlink path rejected: ' + str(part))
     if exists:
         require(value.exists(), 'Missing binding input: ' + str(value))
     return value.resolve(strict=exists)
@@ -150,7 +162,7 @@ def source_snapshot(root, edition):
                 grouped.setdefault(group, []).append(row)
     for name, group in [('runtime-cpp/CMakeLists.txt', 'runtime'), ('hooks.js', 'assets'), ('scenario_presets.json', 'assets'),
                         ('case_prompt_templates.json', 'assets'), ('build-cpp.ps1', 'packaging'), ('build.ps1', 'packaging'),
-                        ('编译指令.txt', 'packaging'), ('runtime-cpp/licenses/sqlite.txt', 'packaging'),
+                        ('编译指令.txt', 'packaging'), ('runtime-cpp/licenses/sqlite.txt', 'packaging'), ('runtime-cpp/licenses/perfetto.txt', 'packaging'),
                         ('editions/community/LICENSE', 'packaging'), ('editions/community/NOTICE', 'packaging')]:
         file = root / name
         if file.is_file():

@@ -39,7 +39,7 @@ Json export_case(const fs::path& directory, const fs::path& destination) {
     index.run("INSERT OR IGNORE INTO blobs VALUES(?,?,?)", Json::array({digest, utf8(file), bytes}));
   };
   lines(root / "catalog/resources.jsonl", [&](Json row) {
-    for (auto key : {"body", "postBody", "encodedBody", "bodyPrefix"}) { if (std::string_view(key)=="bodyPrefix"&&!row.contains(key)) continue; check_reference(field(row, key)); row[key] = copy_reference(field(row, key)); }
+    for (auto key : {"body", "postBody", "encodedBody", "bodyPrefix", "sourcePostBody"}) { if ((std::string_view(key)=="bodyPrefix"||std::string_view(key)=="sourcePostBody")&&!row.contains(key)) continue; check_reference(field(row, key)); row[key] = copy_reference(field(row, key)); }
     index.run("INSERT INTO network(data) VALUES(?)", Json::array({row}));
   });
   lines(root / "catalog/scripts.jsonl", [&](Json row) {

@@ -11,6 +11,16 @@ import tempfile
 import time
 
 
+def system_link(part):
+    """Allow only the fixed macOS top-level aliases (/var, /tmp, /etc)."""
+    if sys.platform != 'darwin' or part.parent != Path('/') or part.name not in ('var', 'tmp', 'etc'):
+        return False
+    try:
+        return Path(os.path.realpath(part)) == Path('/private') / part.name
+    except OSError:
+        return False
+
+
 def digest(file):
     value = hashlib.sha256()
     with Path(file).open('rb') as stream:
@@ -27,6 +37,8 @@ def checked_path(file):
         except FileNotFoundError:
             continue
         if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+            if system_link(part):
+                continue
             raise ValueError('Export paths must not traverse links: ' + str(part))
     return file
 
@@ -86,6 +98,16 @@ def rename_exclusive(source, destination):
         if rename(-100, os.fsencode(source), -100, os.fsencode(destination), 1):
             error = ctypes.get_errno()
             raise OSError(error, os.strerror(error), str(destination))
+    elif sys.platform == 'darwin':
+        libc = ctypes.CDLL(None, use_errno=True)
+        rename = getattr(libc, 'renamex_np', None)
+        if rename is None:
+            raise OSError(errno.ENOTSUP, 'Exclusive atomic directory rename is required')
+        rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        rename.restype = ctypes.c_int
+        if rename(os.fsencode(source), os.fsencode(destination), 0x00000004):  # RENAME_EXCL
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error), str(destination))
     else:
         raise OSError(errno.ENOTSUP, 'Exclusive atomic directory rename is required')
 
@@ -93,8 +115,9 @@ def rename_exclusive(source, destination):
 class ExportTransaction:
     def __init__(self, destination, forbidden_root):
         self.destination = checked_path(destination)
-        root = Path(forbidden_root).resolve()
-        if self.destination.exists() or self.destination == root or self.destination.is_relative_to(root):
+        root = Path(os.path.realpath(forbidden_root))
+        canonical = Path(os.path.realpath(self.destination))
+        if self.destination.exists() or canonical == root or canonical.is_relative_to(root):
             raise ValueError('A fresh export outside the internal source tree is required')
         self.destination.parent.mkdir(parents=True, exist_ok=True)
         checked_path(self.destination.parent)

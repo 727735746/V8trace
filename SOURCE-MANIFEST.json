@@ -5,13 +5,13 @@
   "scope": "community-cpp-ui-and-native-build-source",
   "professionalImplementationIncluded": false,
   "fullNativeExportIncluded": false,
-  "nativeVerificationComplete": true,
+  "nativeVerificationComplete": false,
   "independentBuildVerified": false,
   "transformations": [
     {
       "path": "runtime-cpp/CMakeLists.txt",
-      "inputSha256": "afb2051581532f9c42a5e4ad93445bb2ced333e3435ba73f8af1033b63b1a0e1",
-      "outputSha256": "7e8957dccdae771f0b3db928f06b50ed4ef19d8a10ffc95518018eb33f68bd0a",
+      "inputSha256": "84268e095169263f7859a0bc290a89d1a4eb1cc4a1e2d4527f31c8ffe0a05bf0",
+      "outputSha256": "7f9b912a251093ae59c76cc1abad4dc50bea1294bd98991e0456d91415554a55",
       "reason": "Exclude private Chromium-only build-supervisor tests from host-only snapshot"
     },
     {
@@ -22,51 +22,76 @@
     },
     {
       "path": "runtime-cpp/tests/integration_test.py",
-      "inputSha256": "a48342d14d582b66a0551886493ee39cf662702339884d85dca344157b8990c7",
-      "outputSha256": "4ea5a974c4dbb0149682e5e7a5c96e0768f9e8155f73d3e19a849082a29d60ee",
+      "inputSha256": "82f85c8c7583c754bb583eaa147217c969d6f4c8b6e9a2399ee2fb480e441de9",
+      "outputSha256": "efe39f9b4a1ec7485760ae097daa4842608f1175a47c7b2c1fed87b93e6d2fb4",
       "reason": "Read file-only capture summary from its original output file"
     }
   ],
   "files": [
     {
       "path": ".gitattributes",
-      "bytes": 9,
-      "sha256": "8b9c3028d6467ff3be7c793141927841d70f47f52d0590677438f488ca154992"
+      "bytes": 8,
+      "sha256": "705fd4d6451a31d36b3df7de96f83f30ac976c9b4a6d1e51671d8e2f33e2d0da"
     },
     {
       "path": ".gitignore",
-      "bytes": 52,
-      "sha256": "e0f232fbf7f36adc5ad1dfbd0e6f9328cdc59c629892000f33a9f026d64be92c"
+      "bytes": 46,
+      "sha256": "c0dc9e0a521c7ad68e45e6f199aa0fa78e569aae140ba06d3c6824f893f9a41d"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "NOTICE",
+      "bytes": 417,
+      "sha256": "88ed1c2f6e3d0a87bc1fa2de3bf5b1271b55eed7fe47d3872312fd3df4b74b0e"
+    },
+    {
+      "path": "README-cheatsheet.md",
+      "bytes": 31893,
+      "sha256": "4088c6e6540f0e93630562478f9639d39b92bd0d7c2ff2a36f7f442dca92d2a6"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3174,
+      "sha256": "31ff5acee40331a28e598d8a9a6ecc2c6b3abbcc1b57d7e517a06f87a95d2bae"
+    },
+    {
+      "path": "UI主题与日志管理说明.md",
+      "bytes": 10714,
+      "sha256": "2de4cc37c5f439aee20ea9b377af904b18af8d01b88e27810a0e1ba7a3265651"
     },
     {
       "path": "build-cpp.ps1",
-      "bytes": 18170,
-      "sha256": "26bd28d6f474adfe2e3781396deb4e0a08cc4d2c7eb57b300b895a4f3fe3cd6c"
+      "bytes": 18570,
+      "sha256": "395afe16ac1e2315c161d5879673258174680894e047468bf2566b1b372c0ebc"
     },
     {
       "path": "build.ps1",
-      "bytes": 409,
-      "sha256": "9ca87aede253157bf888f32750c5b4507c112dbf4b471fe081e4da27e9c014d2"
+      "bytes": 396,
+      "sha256": "6d3498cfda407bb6617985e7474d1dd16b77d400e838d033ed14f763cd1e8f5b"
     },
     {
       "path": "case_prompt_templates.json",
-      "bytes": 28473,
-      "sha256": "b9cf1622070cd93198310f3b7f8f9b09b98098c90d3eeeb06a419e7ad4cd60ea"
+      "bytes": 28291,
+      "sha256": "93298d7e0d44d1780dbc2394c29200d1b45b42f933fd1021350bf6f57bdd10a7"
     },
     {
       "path": "editions/artifact-tools.ps1",
-      "bytes": 3107,
-      "sha256": "2a88bc953d5b16547fec17c6d9772167d36b10fce9c588c6eb0b2eb13316dd2a"
+      "bytes": 3064,
+      "sha256": "01296b9caf1b0b748c23816877efe69c9686d6b28092d290a3161bdd68294635"
     },
     {
       "path": "editions/artifact_binding.py",
-      "bytes": 29274,
-      "sha256": "d9a9e62f26e6f3ac4256870f17dfe58414ccb11b404464c35170cc5764c631ae"
+      "bytes": 29712,
+      "sha256": "58e8800f847c775e903c38f77f53910750d4c21742eff5459f84945a5b0c4c1f"
     },
     {
       "path": "editions/atomic_export.py",
-      "bytes": 6201,
-      "sha256": "683cb6f8ece14e248b82432c9d7f1b56fef042054609ea2200eec26150c356e2"
+      "bytes": 7234,
+      "sha256": "f075d7a26e705f45bf52550cbce229e5474a9d0ef04ae060644c723e46f29d7e"
     },
     {
       "path": "editions/community/LICENSE",
@@ -80,13 +105,13 @@
     },
     {
       "path": "editions/export-community-host.py",
-      "bytes": 10875,
-      "sha256": "7873f443f784366dd39dc278fec5bd6e4c6ea3bcbd4e876cd0c81a16511a948a"
+      "bytes": 11158,
+      "sha256": "98932a09b5bff41de49ecf46913fe3ea69ed084591742782abe5793ab3ee482e"
     },
     {
       "path": "editions/release_state.py",
-      "bytes": 7440,
-      "sha256": "47b4d33bcfdf4494694169db63c6415048cab44bb4f6b3177c4a20550cc0ef3a"
+      "bytes": 10242,
+      "sha256": "80d4bc542123bc1c09c992e830c5cdee57d6db5de45d4ac65f7ec10fca73a33a"
     },
     {
       "path": "editions/runtime-identity.ps1",
@@ -140,8 +165,8 @@
     },
     {
       "path": "editions/verify-runtime.ps1",
-      "bytes": 7248,
-      "sha256": "d3a547b8dfc575dd42b4a74f2b73740eedb1da3adf7807c6fe5ca28c723b4a1c"
+      "bytes": 7168,
+      "sha256": "2dc0fe7af9c47fd3f8d199314ebcbc23173927e698e0c633562c9edc4680a1ad"
     },
     {
       "path": "editions/verify-source-boundary.py",
@@ -174,9 +199,19 @@
       "sha256": "b972f4abf7ba0e75aa1d8d1946f8b65cdc659e8d9dd4e8f6d4f542fd0c097de7"
     },
     {
-      "path": "LICENSE",
-      "bytes": 11358,
-      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+      "path": "macOS-ACCEPTANCE.md",
+      "bytes": 3223,
+      "sha256": "7764dc730520356c605bb8611b44c1a628b9fae7010cbd6f3a515346ffc89cd0"
+    },
+    {
+      "path": "native/JSCall优化说明.md",
+      "bytes": 5073,
+      "sha256": "b074b04a4dd535eed4d334cf1ed247b82fb33fe693935da656b2f8c769bb8e89"
+    },
+    {
+      "path": "native/README.md",
+      "bytes": 5772,
+      "sha256": "34bd4aa34465b09e0b59bfb51795200601779fcfa314c626fcf04c038ea4c8db"
     },
     {
       "path": "native/args.gn",
@@ -185,8 +220,8 @@
     },
     {
       "path": "native/browser_metadata.py",
-      "bytes": 8336,
-      "sha256": "8dc30f01181625a722c813248ba78713072b799bf8cd9a9a535d62cd58af4651"
+      "bytes": 19811,
+      "sha256": "f381cce74b1ce235c551db5b84be67215cb899475c5d6e8cc8d7905e60b4b5ca"
     },
     {
       "path": "native/build_community_chrome.py",
@@ -195,13 +230,13 @@
     },
     {
       "path": "native/community-chromium.patch",
-      "bytes": 203616,
-      "sha256": "88ae6d08755f8394632ea5e85498805dd36095f5ee023af9dc2c44867f6748b9"
+      "bytes": 208338,
+      "sha256": "bf4e66023d39c1f6ee2cd6a035a4b3fc703e34b5c0aeadb46fcded9ab28c7f67"
     },
     {
       "path": "native/community-source.json",
-      "bytes": 26484,
-      "sha256": "6aa06f23d68164413332838f37c553ed6665aff3728b3834d8f515a868649341"
+      "bytes": 25897,
+      "sha256": "28df270abe0bcff6d15c0dc838b7a6ba0188179fac50aa447bd212bb1edb5a22"
     },
     {
       "path": "native/community-v8.patch",
@@ -219,39 +254,34 @@
       "sha256": "0fac0e043907594f7156dcc59e77c608c1888e01b3f2d652d513bb86e13a1169"
     },
     {
-      "path": "native/JSCall优化说明.md",
-      "bytes": 5073,
-      "sha256": "b074b04a4dd535eed4d334cf1ed247b82fb33fe693935da656b2f8c769bb8e89"
-    },
-    {
       "path": "native/licenses/chromium.txt",
       "bytes": 1536,
       "sha256": "368cca1106be99d39ecd32a38d8305585d802a475effb66380b91ffc9bcf709b"
     },
     {
       "path": "native/licenses/ffmpeg-LGPL-2.1.txt",
-      "bytes": 27019,
-      "sha256": "37828f96b745455c387a19946bc005b5e0b7c4cef782bbd67e9de5130d7d0bdc"
+      "bytes": 26517,
+      "sha256": "246041b6ecf9bc32d718a62c57877c78b5eb397b6467e74ed7ae2626ab189c30"
     },
     {
       "path": "native/licenses/ffmpeg-LGPL-3.txt",
-      "bytes": 7816,
-      "sha256": "ea7d049c7705dc13afc202dd18e1827f3484f8212fd3fa7b82fc4a0c363432c9"
+      "bytes": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
     },
     {
       "path": "native/licenses/ffmpeg-LICENSE.md",
-      "bytes": 4473,
-      "sha256": "36f6e2cb63f6a40a72b5c1b6169fb03f338d7eccd336fb3ccd4dcc0b49116dd1"
+      "bytes": 4346,
+      "sha256": "2e1d16c72fd74e12063776371da757322f8b77589386532f4fd8634bde7de1af"
     },
     {
       "path": "native/licenses/openh264.txt",
-      "bytes": 1317,
-      "sha256": "1ca9a98d1b5c6d6f0411c6cb8732299670fafbc33b92fedeca8a86b1e4d3d72e"
+      "bytes": 1295,
+      "sha256": "dd5c1c9668512530fa5a96e4c29ac4033d70a7eeb0eed7a42fddb6dd794ebdbb"
     },
     {
       "path": "native/licenses/perfetto.txt",
-      "bytes": 15275,
-      "sha256": "6bef87f6b4eda6c3cf0f42f780967e192df6412e4933f0ffb106638629aa3364"
+      "bytes": 14990,
+      "sha256": "9a682a56cffc9524dfa9b0b1c0dca9cb81a19e96d5bd0793aaf02c08a95ee7ca"
     },
     {
       "path": "native/licenses/v8.txt",
@@ -274,19 +304,14 @@
       "sha256": "858b90e0e99053e3b4d4ed760aaf1301008c1a59b070eae37c664936d18650ff"
     },
     {
-      "path": "native/README.md",
-      "bytes": 5103,
-      "sha256": "06e78b778c006d4d5c94095dea587118a4597d6e388cc534eaa9409a1360dd03"
-    },
-    {
       "path": "native/supervisor.py",
       "bytes": 9257,
       "sha256": "635ea9c0060d973e024b74440d28cc384c91e3dda95403889b6064fc62b0d094"
     },
     {
       "path": "native/test_browser_metadata.py",
-      "bytes": 3955,
-      "sha256": "a5b823bd293aa572ed438af03e8e54366138bb83b8a0a9ccf58f9411cf5d6a1c"
+      "bytes": 7555,
+      "sha256": "150298007827e545b33b17f6783175ecdf6d91ddd2682224b39383b338860a89"
     },
     {
       "path": "native/test_compile_graph.py",
@@ -324,19 +349,54 @@
       "sha256": "fb4a666a1dd59c82580bc3673c43a262962736926e3feb681f44f6628b1d5315"
     },
     {
-      "path": "NOTICE",
-      "bytes": 417,
-      "sha256": "88ed1c2f6e3d0a87bc1fa2de3bf5b1271b55eed7fe47d3872312fd3df4b74b0e"
+      "path": "native/v8trace-json.h",
+      "bytes": 2385,
+      "sha256": "e43289a96ba3eb7a5d57af83448c670a2f29495b882a60bc1add6f807ae40569"
     },
     {
-      "path": "README-cheatsheet.md",
-      "bytes": 31893,
-      "sha256": "4088c6e6540f0e93630562478f9639d39b92bd0d7c2ff2a36f7f442dca92d2a6"
+      "path": "native/v8trace-script-intern-cache.h",
+      "bytes": 1322,
+      "sha256": "1c66b78cfbf684d266f365b64c113e7d447c285d51e8fa4c5c0282541672024c"
     },
     {
-      "path": "README.md",
-      "bytes": 2259,
-      "sha256": "9ae06868dfe38561d9f5bf961b5e3fa89903de19254dd5824b66d1cebf9f81bc"
+      "path": "native/v8trace-sha256.h",
+      "bytes": 2578,
+      "sha256": "8743ff53bb7233906ef16920bb9a8d8f41ca040fba91747badb2b464b2e8b45b"
+    },
+    {
+      "path": "runtime-cpp/CMakeLists.txt",
+      "bytes": 24247,
+      "sha256": "7f9b912a251093ae59c76cc1abad4dc50bea1294bd98991e0456d91415554a55"
+    },
+    {
+      "path": "runtime-cpp/CMakePresets.json",
+      "bytes": 1128,
+      "sha256": "422b593b12a7bfbae7f90bedb48e87b22ee66f32baf45f2527267dc33d2f60e4"
+    },
+    {
+      "path": "runtime-cpp/HTTP首栈与参数DOM插桩说明.md",
+      "bytes": 13895,
+      "sha256": "1d8fc3a64c0d611a36bfb2a7e62c400a63f7689ef7425459c0980e70c1074779"
+    },
+    {
+      "path": "runtime-cpp/JSVMP与缓冲说明.md",
+      "bytes": 5712,
+      "sha256": "48c12d5e1ee496ad908e41269b49deb404e10766404b40c25dfa545380ee5ea7"
+    },
+    {
+      "path": "runtime-cpp/MCP搜索分析说明.md",
+      "bytes": 12335,
+      "sha256": "5f4df5d05c94a5d2e7f757d4f63ed5db388811aa80182c55332d91a6c4faf471"
+    },
+    {
+      "path": "runtime-cpp/README.md",
+      "bytes": 17409,
+      "sha256": "505bf5d99b53dad88733b5c4a5b4f482bd2811f126f167e51aff56dec59ca0c0"
+    },
+    {
+      "path": "runtime-cpp/VM探针与WASM模块说明.md",
+      "bytes": 7037,
+      "sha256": "d2fbe35926ec1d2b5755ed29aaa7d09ce5d0d34bb29c67b5cd585d73ce9e3213"
     },
     {
       "path": "runtime-cpp/cmake/edition_build.h.in",
@@ -347,21 +407,6 @@
       "path": "runtime-cpp/cmake/msvc_utf8_launcher.py",
       "bytes": 1253,
       "sha256": "f8d1a712850e406cbd7acb6b02777e7d7b041cf8e6b94ceef9ab3042d0647965"
-    },
-    {
-      "path": "runtime-cpp/CMakeLists.txt",
-      "bytes": 22385,
-      "sha256": "7e8957dccdae771f0b3db928f06b50ed4ef19d8a10ffc95518018eb33f68bd0a"
-    },
-    {
-      "path": "runtime-cpp/CMakePresets.json",
-      "bytes": 1128,
-      "sha256": "422b593b12a7bfbae7f90bedb48e87b22ee66f32baf45f2527267dc33d2f60e4"
-    },
-    {
-      "path": "runtime-cpp/HTTP首栈与参数DOM插桩说明.md",
-      "bytes": 13061,
-      "sha256": "b689a57ef09bdd6e4d3ab7d4a8c9be0d1fd4edefb9a745126de1417cf3868071"
     },
     {
       "path": "runtime-cpp/include/v8trace/causal_queries.h",
@@ -382,6 +427,11 @@
       "path": "runtime-cpp/include/v8trace/edition.h",
       "bytes": 470,
       "sha256": "5f97de2aca93e6de85c4284d4d3ceb02c8daa531111b1f31a0be098f6da074bb"
+    },
+    {
+      "path": "runtime-cpp/include/v8trace/http_drain.h",
+      "bytes": 808,
+      "sha256": "29e3194376adc0604f8a055ff526bcb23847ea84aa076a8a27d919bd858f8b23"
     },
     {
       "path": "runtime-cpp/include/v8trace/index.h",
@@ -429,6 +479,11 @@
       "sha256": "3c1de250ff4ac1b790d13910ff777c90c9437dcf5b8a923b8101925a3f12cf3d"
     },
     {
+      "path": "runtime-cpp/include/v8trace/trace_conversion.h",
+      "bytes": 324,
+      "sha256": "f9737e43a79dd2c53a60b40206a7bba294a6f20c9f8f00b946884b592531a734"
+    },
+    {
       "path": "runtime-cpp/include/v8trace/trace_search.h",
       "bytes": 1068,
       "sha256": "1464ec99fe02480f52fd50b51f96b3fe34b42049c97f82f81fda9c95c370123d"
@@ -437,11 +492,6 @@
       "path": "runtime-cpp/include/v8trace/vmp_probe.h",
       "bytes": 213,
       "sha256": "0e13ba19db8a2370e39e055575ae8bc43644d09283874943e96e74b895e8d757"
-    },
-    {
-      "path": "runtime-cpp/JSVMP与缓冲说明.md",
-      "bytes": 5712,
-      "sha256": "48c12d5e1ee496ad908e41269b49deb404e10766404b40c25dfa545380ee5ea7"
     },
     {
       "path": "runtime-cpp/licenses/sqlite.txt",
@@ -454,29 +504,19 @@
       "sha256": "6fb216e3d3848e0a2b8dbfe521737409675e613deb49eb6c5898c1d0aa84cd62"
     },
     {
-      "path": "runtime-cpp/MCP搜索分析说明.md",
-      "bytes": 12335,
-      "sha256": "5f4df5d05c94a5d2e7f757d4f63ed5db388811aa80182c55332d91a6c4faf471"
-    },
-    {
-      "path": "runtime-cpp/README.md",
-      "bytes": 16878,
-      "sha256": "bb5d3faa9ad25e828efc4aef45018f2ed03fcec8b1eb435777ee6e69bcbf9640"
-    },
-    {
       "path": "runtime-cpp/src/browser_import.cpp",
-      "bytes": 28281,
-      "sha256": "e099e47f8fea3df00da59e0d049aa0d7b052da40386fe7c7618b64f903866903"
+      "bytes": 36684,
+      "sha256": "9b125d3c1c85cda0a75d15898fa8ffa05658fdf06d13f8dee8c4e104f9340e20"
     },
     {
       "path": "runtime-cpp/src/capture.cpp",
-      "bytes": 11603,
-      "sha256": "d1778ff5c133d913a6e99b5ad554a0c17068046d73321ebbb10f11239799dd85"
+      "bytes": 11944,
+      "sha256": "8c047e4f82d396ecab1a2e2f04a894f8aa16baa53651eec8e3a7ba7b76b01eb1"
     },
     {
       "path": "runtime-cpp/src/causality_import.cpp",
-      "bytes": 1652,
-      "sha256": "0dc4ca3feeee874f153940b52a8873f731ba9713dd6a21f6f0109800a387c62b"
+      "bytes": 1815,
+      "sha256": "2e88db9adbb1b29db37fe067649dfdc49986dadbdae59a1f6d1b2cc6b90065cd"
     },
     {
       "path": "runtime-cpp/src/cdp.cpp",
@@ -520,8 +560,13 @@
     },
     {
       "path": "runtime-cpp/src/export.cpp",
-      "bytes": 15621,
-      "sha256": "0f0a868e99c02d2b347f1c8af433bdce0d6e81116659408cc783729f23698747"
+      "bytes": 15682,
+      "sha256": "7e6198ff497d732a25e21920dbf60a35fddb0ccc68fe427593e26cb62343894e"
+    },
+    {
+      "path": "runtime-cpp/src/http_drain.cpp",
+      "bytes": 6432,
+      "sha256": "cdb09a15153ba27de767cf347c0de86121a9debcd991bb821d191ed13ccedadb"
     },
     {
       "path": "runtime-cpp/src/import.cpp",
@@ -560,8 +605,8 @@
     },
     {
       "path": "runtime-cpp/src/options.cpp",
-      "bytes": 41059,
-      "sha256": "91528c5797b6aa222666663ef83dc68aa09ed252a65ccad26045e5d63698fe62"
+      "bytes": 43710,
+      "sha256": "6f161b363390f6322f16cb040c28f624232aaf736086fc3f766393633acf0b6f"
     },
     {
       "path": "runtime-cpp/src/platform.cpp",
@@ -575,8 +620,8 @@
     },
     {
       "path": "runtime-cpp/src/recording_native.cpp",
-      "bytes": 9572,
-      "sha256": "66cb901114151c058ed677d2dd5573812c171bc4e71b75c8153425c348d89eb1"
+      "bytes": 17580,
+      "sha256": "98851e60cc880ca8fc980707f43edcbf194b79aabf3b7da09fcce383ed063c98"
     },
     {
       "path": "runtime-cpp/src/runtime.rc",
@@ -620,18 +665,23 @@
     },
     {
       "path": "runtime-cpp/src/tcp.cpp",
-      "bytes": 21400,
-      "sha256": "b4ee1359e5e4b1d1fe204fc1812f2e3fbbc512f37faa8d66f3e2c919827d2ae4"
+      "bytes": 21398,
+      "sha256": "63dfe59429f680603b6ebd8bc59a85f20421bffe5f7ea8d30fe6bea28102e7ef"
     },
     {
       "path": "runtime-cpp/src/trace.cpp",
-      "bytes": 15116,
-      "sha256": "a0dde810cc8e2c07b4dea183ee8d9075f7c6ecd77ca10e540d11d5976ee86612"
+      "bytes": 16921,
+      "sha256": "e785b611792d7a04ef60106a7bd39e068dc1c25bc098c7222ae70afd8a88806d"
+    },
+    {
+      "path": "runtime-cpp/src/trace_conversion.cpp",
+      "bytes": 5658,
+      "sha256": "366c59b89c9e6445c6e02b491c03d8504e541dae718bb2a2585c7d578208713b"
     },
     {
       "path": "runtime-cpp/src/trace_line_index.cpp",
-      "bytes": 18038,
-      "sha256": "8d31259b5390159f88f53c7ea17edd88e01ee1984ef526481a4fda8ebe389eb0"
+      "bytes": 18056,
+      "sha256": "4de800ef8e03bc781d97b63916f97d09db543646b750e71d209b937422040f94"
     },
     {
       "path": "runtime-cpp/src/trace_search.cpp",
@@ -655,8 +705,8 @@
     },
     {
       "path": "runtime-cpp/src/viewer.cpp",
-      "bytes": 20100,
-      "sha256": "6d8d0f4e2a4371d407983b92eee2e6a6c665ad24478a07eb3a685c8618064b0b"
+      "bytes": 20109,
+      "sha256": "36c255a9116a5f47b88704cf6246bb1779a6a524cc6a8832369d909dbbdff65c"
     },
     {
       "path": "runtime-cpp/tests/buffer_tests.cpp",
@@ -667,6 +717,11 @@
       "path": "runtime-cpp/tests/catalog_tests.cpp",
       "bytes": 8481,
       "sha256": "b786cd6d2b24df91fdd492692c1d912ea395c516b83ee152a0f6aed600e128f9"
+    },
+    {
+      "path": "runtime-cpp/tests/causal_storage_tests.cpp",
+      "bytes": 4981,
+      "sha256": "286a8f6dcb6564125da67e67d2424f829e946e51695d4df777a89e4137707306"
     },
     {
       "path": "runtime-cpp/tests/closure_tests.cpp",
@@ -729,9 +784,14 @@
       "sha256": "238c63447d3be57001ae08b81b7ae007e38ae24c332f56b8bf216db68e9318b2"
     },
     {
+      "path": "runtime-cpp/tests/http_drain_tests.cpp",
+      "bytes": 6818,
+      "sha256": "54c883e0a873577b7bef2f552501fa6b5531bec1c81670acbec2080cba320758"
+    },
+    {
       "path": "runtime-cpp/tests/http_integrity_tests.cpp",
-      "bytes": 7224,
-      "sha256": "1ed36fad22971c092e419dc8aa6626a58e109e203af5db341573a5e85bab380b"
+      "bytes": 20035,
+      "sha256": "abaaa8a13fc141987bda788b49f99b1e45effc25c11f6d9a78972d15a5dd4e68"
     },
     {
       "path": "runtime-cpp/tests/index_tests.cpp",
@@ -740,8 +800,8 @@
     },
     {
       "path": "runtime-cpp/tests/integration_test.py",
-      "bytes": 25329,
-      "sha256": "4ea5a974c4dbb0149682e5e7a5c96e0768f9e8155f73d3e19a849082a29d60ee"
+      "bytes": 27254,
+      "sha256": "efe39f9b4a1ec7485760ae097daa4842608f1175a47c7b2c1fed87b93e6d2fb4"
     },
     {
       "path": "runtime-cpp/tests/integrity_tests.cpp",
@@ -755,23 +815,33 @@
     },
     {
       "path": "runtime-cpp/tests/long_path_tests.cpp",
-      "bytes": 7262,
-      "sha256": "4f530e95a3bba8b6c56a74133836a09a897f83755c66c9155bd7caa4a536ba57"
+      "bytes": 7547,
+      "sha256": "981d0b4fc901f07006c8d0e88de3f5672b43c1db7826ad5a50525cf993ed1a1d"
     },
     {
       "path": "runtime-cpp/tests/mcp_integration_test.py",
-      "bytes": 28575,
-      "sha256": "2161593e634affdca4053bc41fa76d81322fe8981ccbf9daa43bc137bd9bf6f5"
+      "bytes": 28933,
+      "sha256": "806b7b08506b31ccdd14c61d4814ccb90161dad9174360f6c5d3820fdc321f16"
     },
     {
       "path": "runtime-cpp/tests/recording_tests.cpp",
-      "bytes": 16988,
-      "sha256": "578f77f6da857346785cc4dc186e233aedc0e1a1c921546540d3eb316a988b10"
+      "bytes": 33557,
+      "sha256": "add022cfbd5bc4c16b37050483f3d25e7c56997818c4b71877bbb513baba046b"
     },
     {
       "path": "runtime-cpp/tests/scenario_contract_tests.cpp",
       "bytes": 8220,
       "sha256": "5c83b520e4e0d95f002de151167790422ac432759a502c851c4bfc49cc94d5f4"
+    },
+    {
+      "path": "runtime-cpp/tests/script_cache_tests.cpp",
+      "bytes": 3076,
+      "sha256": "dab3f2a64435c394373f080c8562bf7d28350fb2068f321e197fadc8db13f804"
+    },
+    {
+      "path": "runtime-cpp/tests/script_interning_tests.cpp",
+      "bytes": 5688,
+      "sha256": "44f9784de4c5c4535acae5e68be92f493a100ff4c65fbb2a76cf0fb1feb0812e"
     },
     {
       "path": "runtime-cpp/tests/share_path_tests.ps1",
@@ -800,8 +870,13 @@
     },
     {
       "path": "runtime-cpp/tests/studio_tests.cpp",
-      "bytes": 14741,
-      "sha256": "bd1cba2e39b6a3605f9043c834adaee7b3114f2fbaa5860cb46e57b8d89a9f56"
+      "bytes": 15846,
+      "sha256": "47579d7d8c9e5187b0186234850641e8c7f864a64be1cd2e04984b72fede46a6"
+    },
+    {
+      "path": "runtime-cpp/tests/trace_conversion_tests.cpp",
+      "bytes": 5899,
+      "sha256": "1a2f54de4fec687a1d49be1be16d73593568b8ac5bdd77c9457e6ff7d2d5aea4"
     },
     {
       "path": "runtime-cpp/tests/trace_search_tests.cpp",
@@ -924,24 +999,19 @@
       "sha256": "70a65b85941f16fe8eb091c0675e4f7c72b3c42c43dcc2f8f3fd5b7f64c13b23"
     },
     {
-      "path": "runtime-cpp/VM探针与WASM模块说明.md",
-      "bytes": 7108,
-      "sha256": "132addfefeafdcdec107090faa228eb8c06f42e3855c6098554ba48b1205020a"
-    },
-    {
       "path": "runtime-cpp/分享副本说明.md",
       "bytes": 4804,
       "sha256": "99df08b6faec92dd746338e0c84e167cbabccb3dc5cfc186b0971d8a00eec09a"
     },
     {
       "path": "runtime-cpp/原生环境取证说明.md",
-      "bytes": 4700,
-      "sha256": "786888029a4a9112d27544120a4b1666c0ec2bd60f3148953ce157a070bcebb5"
+      "bytes": 4660,
+      "sha256": "4f4eb5f6fb6bcde1f274e949cf4d33cff69927261557035038223add8e09235e"
     },
     {
       "path": "runtime-cpp/后台HTTP与常驻Job完整性说明.md",
-      "bytes": 4165,
-      "sha256": "51e6bf7dfe87f26e95a6ad5903fe2db6df934c273f5a785165386e9fb417efa9"
+      "bytes": 19249,
+      "sha256": "6a1db31792ee460219dc8981acadf1d2f56e415015d0021f4bab2239586ee73b"
     },
     {
       "path": "runtime-cpp/大日志索引说明.md",
@@ -970,28 +1040,13 @@
     },
     {
       "path": "scenario_presets.json",
-      "bytes": 72352,
-      "sha256": "a090e214c82938df63bf4b46a7188c6a1967c700669ff380a1e180b6cf4a07a8"
+      "bytes": 70245,
+      "sha256": "cdf38ef93b5d0d5d723aca6fbb35291ecc8b87a2928b7cff0c16f2a972f074ef"
     },
     {
       "path": "ui/AssemblyInfo.cs",
       "bytes": 360,
       "sha256": "cfe663fa8e13b7122de244bb948314a7adb93fdda4145061da3ffe2230ffb849"
-    },
-    {
-      "path": "ui/assets/alcohol-v8trace.ico",
-      "bytes": 57966,
-      "sha256": "08331bfc708a600d64e331b9dabfd7d67336e9b3129656213b2d8ae06c55d3fd"
-    },
-    {
-      "path": "ui/assets/alcohol-v8trace.png",
-      "bytes": 108754,
-      "sha256": "faff55f4234dcaebde3d1a5877659f111d3c8bf3bf071256d3d8d2d06a643845"
-    },
-    {
-      "path": "ui/assets/Build-Icon.ps1",
-      "bytes": 3457,
-      "sha256": "b8fa46254f3a5db2ac8f07b5f27816a6eb910f8693311bbc8b799174e5f108b6"
     },
     {
       "path": "ui/LogStorage.cs",
@@ -1012,11 +1067,6 @@
       "path": "ui/TraceWindow.Causality.cs",
       "bytes": 22753,
       "sha256": "f19fe750477ac275c4cad03b6bf368e256eb2de23335052be46764f81b8e332d"
-    },
-    {
-      "path": "ui/TraceWindow.cs",
-      "bytes": 91235,
-      "sha256": "c72bc7a7b1136e99e7e9e64acc1c44748982d6fbc0dd22e210017a82143c23a0"
     },
     {
       "path": "ui/TraceWindow.Cyber.cs",
@@ -1044,6 +1094,11 @@
       "sha256": "d0565217e6f5564e2789966903a0e468261c4b018ebba7e95d6d819cf53242fe"
     },
     {
+      "path": "ui/TraceWindow.cs",
+      "bytes": 91235,
+      "sha256": "c72bc7a7b1136e99e7e9e64acc1c44748982d6fbc0dd22e210017a82143c23a0"
+    },
+    {
       "path": "ui/V8Trace.exe.config",
       "bytes": 339,
       "sha256": "948cdf2a0219587ac4518698300e0d12a43a3e48eb6416f39fd4baf3c992f4c6"
@@ -1059,28 +1114,43 @@
       "sha256": "ad895d31a33293938d1f8c8ebf99a89f3cf95cd08bce5857a1b1c9a7aeb46880"
     },
     {
-      "path": "UI主题与日志管理说明.md",
-      "bytes": 10714,
-      "sha256": "2de4cc37c5f439aee20ea9b377af904b18af8d01b88e27810a0e1ba7a3265651"
+      "path": "ui/assets/Build-Icon.ps1",
+      "bytes": 3457,
+      "sha256": "b8fa46254f3a5db2ac8f07b5f27816a6eb910f8693311bbc8b799174e5f108b6"
     },
     {
-      "path": "verification/native-validation.json",
-      "bytes": 1700,
-      "sha256": "7b845097ccabe2af4d4775f78284a6b7845cbafa2dc3e2564d8594f673f55358"
+      "path": "ui/assets/alcohol-v8trace.ico",
+      "bytes": 57966,
+      "sha256": "08331bfc708a600d64e331b9dabfd7d67336e9b3129656213b2d8ae06c55d3fd"
+    },
+    {
+      "path": "ui/assets/alcohol-v8trace.png",
+      "bytes": 108754,
+      "sha256": "faff55f4234dcaebde3d1a5877659f111d3c8bf3bf071256d3d8d2d06a643845"
+    },
+    {
+      "path": "verification/source-boundary-macos-arm64.commands.json",
+      "bytes": 66391,
+      "sha256": "b9454843d93a9863aecfae78564ec495883d28a44e87de20be8f2330a112ccc9"
+    },
+    {
+      "path": "verification/source-boundary-macos-arm64.json",
+      "bytes": 5831,
+      "sha256": "66df5f0771018799cd3d39cac29ddd271fb70f7314baba79b69100db6e5a892e"
     },
     {
       "path": "操作手册.md",
-      "bytes": 44995,
-      "sha256": "610520d89e31ddafad7952e8786343a034deaf3e29ea29a2b60ff2d634b76fa4"
+      "bytes": 45281,
+      "sha256": "e8ec34ac22020e68344482041aca5611c69912c408f3362053608d4b20687028"
     },
     {
       "path": "编译指令.txt",
-      "bytes": 2081,
-      "sha256": "bad4fad68608f9975ac57d109eb1c4936c2d93a0bc9712628e03776cac79d7d3"
+      "bytes": 2438,
+      "sha256": "d41eea0652ba47683f72dc1f49fe64b57220dece95315e4bce52291069d2ea36"
     }
   ],
   "communityNativeSourceIncluded": true,
   "fullInternalNativeExportIncluded": false,
   "publicSourceReleaseEligible": false,
-  "nativeSourceManifestSha256": "6aa06f23d68164413332838f37c553ed6665aff3728b3834d8f515a868649341"
+  "nativeSourceManifestSha256": "28df270abe0bcff6d15c0dc838b7a6ba0188179fac50aa447bd212bb1edb5a22"
 }

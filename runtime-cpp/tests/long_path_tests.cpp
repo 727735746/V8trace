@@ -34,7 +34,13 @@ int main() {
   try {
     fs::create_directories(root/"source");
     auto cache=root/path("中文 索引");
+#ifdef __APPLE__
+    // SQLite's unix VFS caps a database path near 512 bytes; keep the deep
+    // Unicode cache path below that cap while still exceeding legacy limits.
+    while(cache.native().size()<380)cache/=path("目录很深 但不缩短缓存路径-0123456789");
+#else
     while(cache.native().size()<420)cache/=path("目录很深 但不缩短缓存路径-0123456789");
+#endif
     check(io_path(io_path(cache))==io_path(cache),"Extended path is idempotent");
     check(logical_path(io_path(cache))==fs::absolute(cache).lexically_normal(),"Logical path roundtrip");
     check(inside(root,io_path(cache)) && inside(io_path(root),cache),"Ordinary/extended containment agrees");

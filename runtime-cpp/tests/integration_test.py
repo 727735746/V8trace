@@ -21,10 +21,24 @@ PARSER.add_argument('--runtime', required=True)
 PARSER.add_argument('--assets', required=True)
 PARSER.add_argument('--evidence')
 PARSER.add_argument('--chrome')
+PARSER.add_argument('--native-chrome')
 ARGS, REMAINING = PARSER.parse_known_args()
 RUNTIME = str(Path(ARGS.runtime).resolve())
 ASSETS = str(Path(ARGS.assets).resolve())
 REPORT = []
+
+
+def runtime_edition():
+    try:
+        result = subprocess.run([RUNTIME, 'version'], capture_output=True, timeout=10)
+        if result.returncode == 0:
+            return json.loads(result.stdout.decode('utf-8')).get('edition', {}).get('id')
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+EDITION = runtime_edition()
 
 
 def encode(value):
@@ -36,8 +50,41 @@ def write_json(file, value):
     file.write_bytes(encode(value))
 
 
+def file_records(arguments):
+    """Return the records CLI capture/import persist beside their output."""
+    values = [str(value) for value in arguments]
+    output = None
+    if '--output' in values:
+        output = values[values.index('--output') + 1]
+    else:
+        config = Path(values[values.index('--config') + 1])
+        document = json.loads(config.read_text(encoding='utf-8-sig'))
+        options = document.get('options', document)
+        output = options.get('output')
+    if not output:
+        return None, None
+    log = Path(output)
+    if not log.is_absolute():
+        log = Path.cwd() / log
+    log = Path(str(log) + '.runtime.jsonl')
+    if not log.is_file():
+        return None, str(log)
+    records = []
+    for line in log.read_text(encoding='utf-8').splitlines():
+        if line.strip():
+            row = json.loads(line)
+            records.append(row.get('record', row))
+    return records, str(log)
+
+
 def invoke(*arguments, timeout=60):
-    result = subprocess.run([RUNTIME, *map(str, arguments)], capture_output=True, timeout=timeout)
+    values = [str(value) for value in arguments]
+    result = subprocess.run([RUNTIME, *values], capture_output=True, timeout=timeout)
+    if values[0] in ('capture', 'import'):
+        records, log = file_records(values)
+        if result.returncode or records is None:
+            raise AssertionError((result.returncode, log, result.stdout.decode('utf-8', 'replace')[-2000:], result.stderr.decode('utf-8', 'replace')))
+        return records
     if result.returncode:
         raise AssertionError((result.returncode, result.stdout.decode('utf-8', 'replace')[-2000:], result.stderr.decode('utf-8', 'replace')))
     return [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
@@ -159,6 +206,7 @@ class Integration(unittest.TestCase):
                                 maxBytes=16777216, maxEvents=1000))
         return trace, options, source, payload, post
 
+    @unittest.skipUnless(EDITION == 'professional', 'requires Professional full native channels')
     def test_native_import_full_values_and_export(self):
         trace, options, source, payload, post = self.fixture()
         summary = invoke('import', '--trace', trace, '--config', options, '--assets', ASSETS)[-1]
@@ -306,7 +354,7 @@ class Integration(unittest.TestCase):
         self.assertEqual(receipt['conclusion'], 'transferred-and-sha256-verified')
         self.assertNotIn(secret.read_text(), json.dumps(receipt))
 
-    def chrome_capture(self, mode, opcode=False):
+    def chrome_capture(self, mode, opcode=False, chrome_path=None):
         marker = '完整参数-' + chr(0xd800) + '-TAIL'
         body = b'HTTP-COMPLETE\x00\xff' + '正文完整'.encode()
         script = ('function echoFull(value){return value;}\n'
@@ -350,7 +398,7 @@ class Integration(unittest.TestCase):
         else:
             hooks = (Path(ASSETS) / 'hooks.js').read_text(encoding='utf-8')
             (assets / 'diagnostic-hooks.js').write_text(hooks[hooks.index('function installDiagnosticHooks('):hooks.index('\nfunction createHookSource(')], encoding='utf-8')
-        options = dict(url='http://127.0.0.1:' + str(server.server_port) + '/', chromePath=str(Path(ARGS.chrome).resolve()),
+        options = dict(url='http://127.0.0.1:' + str(server.server_port) + '/', chromePath=str(Path(chrome_path or ARGS.chrome).resolve()),
                        output=str(self.root / 'capture'), transport=mode, durationSeconds=4, headless=True, disableExtensions=True,
                        scripts=True, http=True, hooks=True, consoleEvents=True, exceptionEvents=True,
                        cpuProfile=False, contextEvents=(mode == 'cdp'), rawCdp=(mode == 'cdp'), nativeTimeline=False,
@@ -402,13 +450,13 @@ class Integration(unittest.TestCase):
             server.server_close()
             thread.join(timeout=5)
 
-    @unittest.skipUnless(ARGS.chrome, 'requires explicit --chrome')
+    @unittest.skipUnless(ARGS.native_chrome, 'requires an instrumented --native-chrome')
     def test_real_chrome_native(self):
-        self.chrome_capture('native')
+        self.chrome_capture('native', chrome_path=ARGS.native_chrome)
 
-    @unittest.skipUnless(ARGS.chrome, 'requires explicit --chrome')
+    @unittest.skipUnless(ARGS.native_chrome, 'requires an instrumented --native-chrome')
     def test_real_chrome_opcode(self):
-        self.chrome_capture('native', opcode=True)
+        self.chrome_capture('native', opcode=True, chrome_path=ARGS.native_chrome)
 
     @unittest.skipUnless(ARGS.chrome, 'requires explicit --chrome')
     def test_real_chrome_cdp(self):

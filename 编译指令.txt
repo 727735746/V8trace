@@ -20,3 +20,5 @@ python -B .\native\media_browser.py --runtime .\dist\V8Trace-Community\runtime\v
 
 请使用全新输出及证据目录；阶段支持 apply/verify/configure/build/package。专业生产/分析实现不在社区源码中。
 完整解压后运行 V8Trace.exe；运行不需要 Node.js。源码和构建缓存不放入软件发行包。
+
+macOS 说明：当前 `build_community_chrome.py` 只支持 Windows x64/MSVC。macOS 26.4 arm64 的 Community C++ 主机内核已单独验收，但定制 Chromium 需要完整 Xcode、ARM64 GN 参数和 `.app/Contents/Frameworks` 运行文件清单，不能直接套用本页 PowerShell 命令；未完成前不要把系统 Chrome 写成定制浏览器。

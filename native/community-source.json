@@ -9,7 +9,7 @@
     "v8": "792d9716fea48312ad7ce4413c538e00628b1d50"
   },
   "patchHashes": {
-    "chromium": "88ae6d08755f8394632ea5e85498805dd36095f5ee023af9dc2c44867f6748b9",
+    "chromium": "bf4e66023d39c1f6ee2cd6a035a4b3fc703e34b5c0aeadb46fcded9ab28c7f67",
     "v8": "d0fb95faf92956905a3fb3a00aa254d706b757b28856f8b5c031645d18d9d684"
   },
   "professionalProducersIncluded": false,
@@ -125,12 +125,12 @@
     },
     {
       "path": "services/network/url_loader.cc",
-      "sha256": "5c02feee6628443a56addd12f32488a8b7f24982d20ccab4e857c26683cb7da0",
+      "sha256": "1ac7c31f504d498e39bfa43f7980501ef80ed79012c20c97df33cfd95428802e",
       "stockSha256": "a2673c1924cdcebb1608bd4e815280bfd31f49c9283ea50002ab004c7290d93b"
     },
     {
       "path": "services/network/v8trace-http.h",
-      "sha256": "4174599738fdad9dafa0c8dd28afa95d2d67787acab3cbc37ec59b916d610c9d",
+      "sha256": "61afdbbc0f8086256dd0ab85de0814c8cdd294e3bcbf1754242b6dc708858ac4",
       "stockSha256": null
     },
     {

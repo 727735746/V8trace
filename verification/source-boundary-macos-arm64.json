@@ -1,0 +1,163 @@
+{
+  "protocol": "v8trace/edition-source-boundary/1",
+  "edition": "community",
+  "status": "runtime-compile-source-boundary-passed",
+  "commandsSha256": "b9454843d93a9863aecfae78564ec495883d28a44e87de20be8f2330a112ccc9",
+  "coreSources": [
+    {
+      "path": "runtime-cpp/src/browser_import.cpp",
+      "sha256": "9b125d3c1c85cda0a75d15898fa8ffa05658fdf06d13f8dee8c4e104f9340e20"
+    },
+    {
+      "path": "runtime-cpp/src/capture.cpp",
+      "sha256": "8c047e4f82d396ecab1a2e2f04a894f8aa16baa53651eec8e3a7ba7b76b01eb1"
+    },
+    {
+      "path": "runtime-cpp/src/causality_import.cpp",
+      "sha256": "2e88db9adbb1b29db37fe067649dfdc49986dadbdae59a1f6d1b2cc6b90065cd"
+    },
+    {
+      "path": "runtime-cpp/src/cdp.cpp",
+      "sha256": "0c0d016d378d429e16beedfa724c3408415408eda274c8efa24e598870e15022"
+    },
+    {
+      "path": "runtime-cpp/src/closure.cpp",
+      "sha256": "c667aeae17f8385dca59815a6b7b88d805e421b0feddc2221388f75035ae10c3"
+    },
+    {
+      "path": "runtime-cpp/src/community_services.cpp",
+      "sha256": "085ebad39fd3b39bb1e4fee5542eb58a98a340326c6c5153c515b1fa33cf92dc"
+    },
+    {
+      "path": "runtime-cpp/src/configuration.cpp",
+      "sha256": "637434bd6eb4e9d4426294fdb6a17d65765b9432775decc8a557dffb717a0262"
+    },
+    {
+      "path": "runtime-cpp/src/correlate.cpp",
+      "sha256": "0079ec367b1b57a7965abcc989ec04056c8d22fede6039e78def4fed22499914"
+    },
+    {
+      "path": "runtime-cpp/src/edition.cpp",
+      "sha256": "b1fcceb7fec95c855574e7256639f437aa28f0813dfc0f6613a3d8ec015156f8"
+    },
+    {
+      "path": "runtime-cpp/src/env_import.cpp",
+      "sha256": "44982f9d389f9a2d9fbf26a72b910b81c4681e7e9be76bbcfba789baa4c292c3"
+    },
+    {
+      "path": "runtime-cpp/src/env_options.cpp",
+      "sha256": "11f36c0d273bc5d902b1df41e9c4c8ad311a606b96370ee4243ad5fae6ac2309"
+    },
+    {
+      "path": "runtime-cpp/src/export.cpp",
+      "sha256": "7e6198ff497d732a25e21920dbf60a35fddb0ccc68fe427593e26cb62343894e"
+    },
+    {
+      "path": "runtime-cpp/src/http_drain.cpp",
+      "sha256": "cdb09a15153ba27de767cf347c0de86121a9debcd991bb821d191ed13ccedadb"
+    },
+    {
+      "path": "runtime-cpp/src/import.cpp",
+      "sha256": "6ff2cdc974bc0ba68d93c802ac26c192ba4497a349dd8c3bea8c817575978641"
+    },
+    {
+      "path": "runtime-cpp/src/index.cpp",
+      "sha256": "826ce8afccbdfb1e03d5fa5605be67e3d10f59e5bf279ce1edfe7b0c917a5730"
+    },
+    {
+      "path": "runtime-cpp/src/journal.cpp",
+      "sha256": "a35c7a1c0661656718ba6d96d256be2c4c0c68bb44a5ceb9fd0c14e3bdddcf80"
+    },
+    {
+      "path": "runtime-cpp/src/json.cpp",
+      "sha256": "dcae4f63774063bcc94c513a778252b75a2a69fd6cbc1006bbcedf8ad5372f20"
+    },
+    {
+      "path": "runtime-cpp/src/mcp.cpp",
+      "sha256": "4fed337d78b925906bd080f45ab85154fb7a66dadcb2ba6a9b91f0740426d876"
+    },
+    {
+      "path": "runtime-cpp/src/mcp_http.cpp",
+      "sha256": "412b0958c2ce4ef989692f0158e9bb65c397b038eeff42919c423179d6e6c7bf"
+    },
+    {
+      "path": "runtime-cpp/src/options.cpp",
+      "sha256": "6f161b363390f6322f16cb040c28f624232aaf736086fc3f766393633acf0b6f"
+    },
+    {
+      "path": "runtime-cpp/src/platform.cpp",
+      "sha256": "4599533126cf0de3f0ab3e890aa4c7916f3d7f19d9c0d1cb9308ea5c21c375e2"
+    },
+    {
+      "path": "runtime-cpp/src/recording.cpp",
+      "sha256": "6c1be7206014cd55f3b7624738ad075ccce87ee6413fcc8d9f7ab1fafb2548d8"
+    },
+    {
+      "path": "runtime-cpp/src/recording_native.cpp",
+      "sha256": "98851e60cc880ca8fc980707f43edcbf194b79aabf3b7da09fcce383ed063c98"
+    },
+    {
+      "path": "runtime-cpp/src/scenario_contract.cpp",
+      "sha256": "47bcfc273f66deb569706861f6e42f8e2f082d8d68f6b8a3b45aa2bfa5b69179"
+    },
+    {
+      "path": "runtime-cpp/src/share.cpp",
+      "sha256": "37fb64e49f9578a5eed83985cb2375b6ffa859d974d6ef01d20d4a477b7e8fd9"
+    },
+    {
+      "path": "runtime-cpp/src/state_correlate.cpp",
+      "sha256": "375232d8f28e5a8591b0ec0098ad297247593140d61696c041874f70cf60c649"
+    },
+    {
+      "path": "runtime-cpp/src/state_import.cpp",
+      "sha256": "45812c5952460e184de977e91478d8616a4bc9f78e0d2ba03dda88725d89979d"
+    },
+    {
+      "path": "runtime-cpp/src/state_options.cpp",
+      "sha256": "b0195753a7f85e617396753428d8776e41345dfc68b3c4175428fb1ab7289580"
+    },
+    {
+      "path": "runtime-cpp/src/store.cpp",
+      "sha256": "13d46ff494475f172d9a1774162568559154b50749aa84e871cabf8b4e4f0362"
+    },
+    {
+      "path": "runtime-cpp/src/stream.cpp",
+      "sha256": "8908ace1c18ab747d3be0030f5301ea19575aed359fd40225cd9d0538d739e29"
+    },
+    {
+      "path": "runtime-cpp/src/tcp.cpp",
+      "sha256": "63dfe59429f680603b6ebd8bc59a85f20421bffe5f7ea8d30fe6bea28102e7ef"
+    },
+    {
+      "path": "runtime-cpp/src/trace.cpp",
+      "sha256": "e785b611792d7a04ef60106a7bd39e068dc1c25bc098c7222ae70afd8a88806d"
+    },
+    {
+      "path": "runtime-cpp/src/trace_conversion.cpp",
+      "sha256": "366c59b89c9e6445c6e02b491c03d8504e541dae718bb2a2585c7d578208713b"
+    },
+    {
+      "path": "runtime-cpp/src/trace_line_index.cpp",
+      "sha256": "4de800ef8e03bc781d97b63916f97d09db543646b750e71d209b937422040f94"
+    },
+    {
+      "path": "runtime-cpp/src/trace_search.cpp",
+      "sha256": "01456ca74b0f8fd0eeb3845ed7d02c874e1e4d3fd8c01e2c9d09f80a04b23dd9"
+    },
+    {
+      "path": "runtime-cpp/src/trace_search_export.cpp",
+      "sha256": "35c31820943339b42df7609346c63112835c83c139edd84be1424d49421692a7"
+    },
+    {
+      "path": "runtime-cpp/src/trace_search_matcher.cpp",
+      "sha256": "b0e5a3069db224a3565a503fc28126f063eed40b7fc06c2d949e9d87f7de9c8c"
+    },
+    {
+      "path": "runtime-cpp/src/viewer.cpp",
+      "sha256": "36c255a9116a5f47b88704cf6246bb1779a6a524cc6a8832369d909dbbdff65c"
+    }
+  ],
+  "professionalImplementationCount": 0,
+  "nativeSourceExportValidated": false,
+  "publicSourceReleaseEligible": false
+}

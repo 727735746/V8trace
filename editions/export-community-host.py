@@ -30,21 +30,22 @@ def export_into(output):
         'editions/发行恢复与导出说明.md',
         'editions/verify-source-boundary.py', 'editions/source-policy.json', 'editions/版本拆分说明.md',
         'editions/community/LICENSE', 'editions/community/NOTICE',
-        'native/JSCall优化说明.md', 'native/v8trace-function-cache.h', 'native/v8trace-call-ledger.h',
+        'native/JSCall优化说明.md', 'native/v8trace-function-cache.h', 'native/v8trace-call-ledger.h', 'native/v8trace-json.h', 'native/v8trace-script-intern-cache.h', 'native/v8trace-sha256.h',
         'runtime-cpp/CMakeLists.txt', 'runtime-cpp/CMakePresets.json',
         'runtime-cpp/cmake/edition_build.h.in', 'runtime-cpp/cmake/msvc_utf8_launcher.py',
         'runtime-cpp/licenses/sqlite.txt', 'runtime-cpp/mcp-client.example.json',
         'runtime-cpp/tests/fixtures/correlation_legacy.cpp',
     }
     sources = '''browser_import.cpp capture.cpp causality_import.cpp cdp.cpp closure.cpp community_services.cpp
-configuration.cpp scenario_contract.cpp share.cpp correlate.cpp edition.cpp env_import.cpp env_options.cpp export.cpp import.cpp index.cpp
+configuration.cpp scenario_contract.cpp share.cpp correlate.cpp edition.cpp env_import.cpp env_options.cpp export.cpp http_drain.cpp import.cpp index.cpp
 journal.cpp json.cpp main.cpp mcp_http.cpp mcp.cpp options.cpp platform.cpp recording_native.cpp recording.cpp
-runtime.rc state_correlate.cpp state_import.cpp state_options.cpp store.cpp stream.cpp tcp.cpp trace_line_index.cpp
+runtime.rc state_correlate.cpp state_import.cpp state_options.cpp store.cpp stream.cpp tcp.cpp trace_conversion.cpp trace_line_index.cpp
 trace_search_export.cpp trace_search_internal.h trace_search_matcher.cpp trace_search.cpp trace.cpp viewer.cpp'''.split()
-    headers = '''causal_queries.h causality.h core.h edition.h index.h journal.h mcp.h recording.h state.h
-stream.h studio.h scenario_contract.h share.h trace_search.h vmp_probe.h'''.split()
-    tests = '''edition_tests.cpp core_tests.cpp integrity_tests.cpp http_integrity_tests.cpp env_tests.cpp
+    headers = '''causal_queries.h causality.h core.h edition.h http_drain.h index.h journal.h mcp.h recording.h state.h
+stream.h studio.h scenario_contract.h share.h trace_conversion.h trace_search.h vmp_probe.h'''.split()
+    tests = '''edition_tests.cpp core_tests.cpp integrity_tests.cpp http_integrity_tests.cpp http_drain_tests.cpp env_tests.cpp
 closure_tests.cpp state_tests.cpp share_tests.cpp stream_tests.cpp index_tests.cpp jscall_tests.cpp catalog_tests.cpp buffer_tests.cpp
+causal_storage_tests.cpp script_interning_tests.cpp script_cache_tests.cpp trace_conversion_tests.cpp
 recording_tests.cpp studio_tests.cpp scenario_contract_tests.cpp trace_search_tests.cpp long_path_tests.cpp compiler_dependencies_test.py
 compiler_launcher_test.py stream_kill_test.py mcp_integration_test.py file_logging_test.py integration_test.py
 community_presets.py community_presets_test.py

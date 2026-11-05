@@ -1,5 +1,7 @@
 import argparse
+import ctypes
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -18,6 +20,54 @@ def file_sha256(file):
         for data in iter(lambda: stream.read(1048576), b''):
             result.update(data)
     return result.hexdigest()
+
+
+class ProcBsdInfo(ctypes.Structure):
+    _fields_ = [
+        ('pbi_flags', ctypes.c_uint32), ('pbi_status', ctypes.c_uint32), ('pbi_xstatus', ctypes.c_uint32),
+        ('pbi_pid', ctypes.c_uint32), ('pbi_ppid', ctypes.c_uint32), ('pbi_uid', ctypes.c_uint32),
+        ('pbi_gid', ctypes.c_uint32), ('pbi_ruid', ctypes.c_uint32), ('pbi_rgid', ctypes.c_uint32),
+        ('pbi_svuid', ctypes.c_uint32), ('pbi_svgid', ctypes.c_uint32), ('rfu_1', ctypes.c_uint32),
+        ('pbi_comm', ctypes.c_char * 16), ('pbi_name', ctypes.c_char * 32),
+        ('pbi_nfiles', ctypes.c_uint32), ('pbi_pgid', ctypes.c_uint32), ('pbi_pjobc', ctypes.c_uint32),
+        ('e_tdev', ctypes.c_uint32), ('e_tpgid', ctypes.c_uint32), ('pbi_nice', ctypes.c_int32),
+        ('pbi_start_tvsec', ctypes.c_uint64), ('pbi_start_tvusec', ctypes.c_uint64),
+    ]
+
+
+def darwin_process_identity(pid):
+    libproc = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+    libproc.proc_pidinfo.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int)
+    libproc.proc_pidinfo.restype = ctypes.c_int
+    libproc.proc_pidpath.argtypes = (ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32)
+    libproc.proc_pidpath.restype = ctypes.c_int
+    info = ProcBsdInfo()
+    result = libproc.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info))
+    if result <= 0:
+        if result < 0 and ctypes.get_errno() in (errno.EPERM, errno.EACCES):
+            raise RuntimeError('Process identity is not readable; retain the existing owner')
+        return None
+    if info.pbi_status == 5:
+        return None
+    path = ctypes.create_string_buffer(4096)
+    size = libproc.proc_pidpath(pid, path, len(path))
+    if size <= 0:
+        if ctypes.get_errno() in (errno.EPERM, errno.EACCES):
+            raise RuntimeError('Process executable identity is not readable; retain the existing owner')
+        return None
+    executable = os.fsdecode(path.raw[:size])
+    try:
+        process = subprocess.run(['ps', '-ww', '-p', str(pid), '-o', 'command='],
+                                 capture_output=True, encoding='utf-8', errors='replace', check=True, timeout=10)
+        command = process.stdout.strip()
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+        if libproc.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info)) <= 0 or info.pbi_status == 5:
+            return None
+        raise
+    if not command:
+        raise RuntimeError('Process identity is incomplete; retain the existing owner')
+    return dict(pid=pid, creationToken=f'{info.pbi_start_tvsec}:{info.pbi_start_tvusec}',
+                commandLine=command, executable=executable)
 
 
 def process_identity(pid):
@@ -44,6 +94,8 @@ def process_identity(pid):
                          commandLine=json.dumps(argv), executable=os.readlink(root / 'exe'))
         except (FileNotFoundError, ProcessLookupError):
             return None
+    elif sys.platform == 'darwin':
+        value = darwin_process_identity(pid)
     else:
         raise RuntimeError('Process birth identity is not implemented on this platform')
     if value is not None and (value.get('pid') != pid or any(not value.get(key) for key in ('creationToken', 'commandLine', 'executable'))):

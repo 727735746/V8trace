@@ -9,7 +9,7 @@
 namespace v8trace {
 namespace {
 void viewer_require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
-int64_t stamp(const fs::path& file) { return fs::last_write_time(file).time_since_epoch().count(); }
+int64_t stamp(const fs::path& file) { return int64_t(fs::last_write_time(file).time_since_epoch().count()); }
 std::string prefix(std::string_view input, size_t maximum) {
   size_t count = std::min(input.size(), maximum); while (count && count < input.size() && (uint8_t(input[count]) & 0xc0) == 0x80) --count;
   return std::string(input.substr(0, count));

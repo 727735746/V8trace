@@ -1,4 +1,5 @@
 #include "v8trace/core.h"
+#include "v8trace/trace_conversion.h"
 #include "v8trace/edition.h"
 #include "v8trace/state.h"
 #include "v8trace/vmp_probe.h"
@@ -190,6 +191,10 @@ Json validate_options(Json input, const fs::path& assets, bool verify_browser) {
       if (enabled(o, "redirectBodies")) require(str(descriptor, "redirectBodyProtocol") == "v8trace/redirect-body/1", "Redirect body protocol missing");
     }
     o["backend"] = native ? (instrumented ? "chromium-native" : "chrome-native") : (instrumented ? "chromium-opcode" : "chrome-cdp");
+    auto export_protocol = str(field(o, "browserIdentity"), "nativeTraceExportProtocol");
+    if (native && (export_protocol == "v8trace/perfetto-file-export/1" || export_protocol == "v8trace/perfetto-file-export/2")
+        && (enabled(o, "recordingControl") || (enabled(o, "http") && enabled(o, "netLog") && str(field(o, "browserIdentity"), "httpDrainProtocol") == "v8trace/http-drain/1")))
+      o["nativeTraceConverter"] = verify_perfetto_converter(executable_path().parent_path());
   }
   auto required = field(o, "require", Json::array()); if (required.is_string()) required = split(text(required), ','); require(required.is_array(), "require must be array or comma-separated text"); auto coverage = capabilities(o); for (auto& name : required) { auto value = str(coverage, text(name), "unavailable"); require(value != "disabled" && value != "unavailable", "Required capability unavailable: " + text(name)); }
   o["edition"] = edition_id();
@@ -215,7 +220,10 @@ Json capabilities(const Json& o) { const bool native = str(o, "transport") == "n
   set("recording.control", enabled(o, "recordingControl"), native ? "native-local-pause-resume" : "cdp-domain-pause-resume");
   set("http", enabled(o, "http"), native ? "native-network-renderer-body-streams" : "cdp-decoded-body"); set("script", enabled(o, "scripts"), native ? "native-v8-source" : "cdp-source"); set("console", enabled(o, "consoleEvents"), native ? "native-console-api" : "cdp-console-api"); set("exception", enabled(o, "exceptionEvents"), native ? "native-unhandled-exceptions" : "cdp-exceptions"); set("env.detail", enabled(o, "hooks"), native ? "native-injected-diagnostic-js-hooks" : "diagnostic-js-hooks"); set("native.detail", enabled(o, "nativeDetail"), "native-api-runtime-builtin-values"); set("jscall.detail", enabled(o, "jsCallDetail"), "native-function-entry-return"); set("jscall.values", enabled(o, "jsCallDetail") && field(o, "jsCallValues", true) == true, enabled(field(o, "detailFilter"), "valueRules") ? "native-selected-call-values" : "native-selected-full-values"); set("wasm.execution", enabled(o, "wasm"), "native-drumbrake-execution"); set("opcode", enabled(o, "opcode"), "native-ignition-execution"); set("objects.snapshot", enabled(o, "objectSnapshots"), "native-own-storage-observation"); set("native.timeline", enabled(o, "nativeTimeline"), "performance-events"); set("jscall.sample", enabled(o, "cpuProfile"), "cpu-sampling"); set("context", enabled(o, "contextEvents"), "cdp-lifecycle"); set("http.redirect-body", enabled(o, "redirectBodies"), "native-bounded-transaction-drain"); set("network.diagnostic", enabled(o, "netLog"), "native-netlog-raw-events-not-decoded-http-bodies"); set("evidence.correlations", enabled(o, "correlations"), "observed-identities-and-labeled-candidates"); return out; }
 Json launch_config(const Json& o, Store& store) {
-  const bool controlled = str(o, "transport") == "native" && enabled(o, "recordingControl");
+  const bool http_drain = str(o, "transport") == "native" && enabled(o, "http") && enabled(o, "netLog")
+      && str(field(o, "browserIdentity"), "httpDrainProtocol") == "v8trace/http-drain/1";
+  const bool controlled = str(o, "transport") == "native" && (enabled(o, "recordingControl") || http_drain);
+  const bool startup_handoff = http_drain && !enabled(o, "recordingControl") && !enabled(o, "startPaused");
   Json categories = Json::array(); if (enabled(o, "nativeTimeline")) { categories.push_back("v8"); categories.push_back("blink.bindings"); categories.push_back("loading"); categories.push_back("devtools.timeline"); }
   if (env_selected(o)) categories.push_back("disabled-by-default-v8.envprobe");
   if (enabled(o,"httpRootTrace")) categories.push_back("disabled-by-default-v8.causality");
@@ -224,24 +232,47 @@ Json launch_config(const Json& o, Store& store) {
   if (state_selected(o)) { categories.push_back("disabled-by-default-v8.state"); for (const auto& channel : selected_state_channels(o)) categories.push_back("disabled-by-default-v8." + text(channel)); }
   if (enabled(o, "wasmModules") || enabled(o, "vmpProbe")) categories.push_back("disabled-by-default-v8.aux");
   if (enabled(o, "opcode")) categories.push_back("disabled-by-default-v8.opcode"); for (auto& channel : details(o)) categories.push_back("disabled-by-default-v8." + channel); for (auto& [key, channel] : browser_options) if (enabled(o, key)) categories.push_back("disabled-by-default-v8." + channel);
+  const auto export_protocol = str(field(o, "browserIdentity"), "nativeTraceExportProtocol");
+  const bool protobuf_export = controlled && !categories.empty() && (export_protocol == "v8trace/perfetto-file-export/1" || export_protocol == "v8trace/perfetto-file-export/2");
+  if (protobuf_export) verify_perfetto_converter(executable_path().parent_path());
   Json config{{"startup_duration", o.at("durationSeconds")}, {"result_file", utf8(store.filename("native-output/trace.json"))}, {"trace_config", {{"record_mode", "record-until-full"}, {"trace_buffer_size_in_kb", std::clamp<uint64_t>(o.at("maxBytes").get<uint64_t>() / 1024, 4096, 1048576)}, {"included_categories", categories}, {"excluded_categories", Json::array({"*"})}}}};
+  if (startup_handoff) config["startup_duration"] = 0;
   std::vector<std::string> args{"--user-data-dir=" + utf8(store.filename("browser-profile")), "--no-first-run", "--no-default-browser-check"}; std::vector<std::string> features;
   if (enabled(o, "disableExtensions")) args.push_back("--disable-extensions");
   const bool high_volume = enabled(o,"httpRootTrace") || enabled(o,"opcode") || !details(o).empty() || enabled(o,"vmpProbe");
   const auto identity = field(o,"browserIdentity");
+  const bool native_flush_timeout = str(o, "transport") == "native" && !categories.empty()
+      && str(identity, "nativeFlushTimeoutProtocol") == "v8trace/native-flush-timeout/1";
+  if (native_flush_timeout) {
+    auto timeout = o.at("traceFlushTimeout").get<uint64_t>();
+    require(timeout >= 100 && timeout <= 3600000, "Native flush timeout transport requires 100..3600000 milliseconds");
+    args.push_back("--v8-trace-flush-timeout-ms=" + std::to_string(timeout));
+  }
   const bool expanded = str(identity,"traceTransportProtocol")=="v8trace/trace-transport/1" && field(identity,"traceSharedMemoryMaxBytes",0)==33554432;
   // Older Chromium rejects serialized shared-memory regions above 8 MiB.
-  if (!categories.empty()) features.push_back("kPerfettoBackendParams:shared_memory_size_bytes/" + std::to_string(high_volume && expanded ? 33554432 : 8388608) + "/page_size_bytes/" + std::to_string(high_volume ? 32768 : 4096));
+  if (!categories.empty()) {
+    std::string producer = "kPerfettoBackendParams:shared_memory_size_bytes/" + std::to_string(high_volume && expanded ? 33554432 : 8388608) + "/page_size_bytes/" + std::to_string(high_volume ? 32768 : 4096);
+    if (high_volume && str(identity, "traceProducerCommitProtocol") == "v8trace/perfetto-producer-commit/1") producer += "/v8trace_batch_commits_ms/0";
+    features.push_back(producer);
+  }
   if (enabled(o, "redirectBodies")) features.push_back("V8TraceRedirectBodyCapture:max_bytes/" + std::to_string(std::min<uint64_t>(o.at("maxBodyBytes").get<uint64_t>(), 1073741824)) + "/timeout_ms/5000");
   if (!features.empty()) { std::string feature; for (auto& part : features) { if (!feature.empty()) feature += ','; feature += part; } args.push_back("--enable-features=" + feature); }
   if (enabled(o, "headless")) args.push_back("--headless=new");
   if (!categories.empty()) {
     store.json("native-output/trace-config.json", config);
-    if (!controlled) { args.push_back("--trace-config-file=" + utf8(store.filename("native-output/trace-config.json"))); args.push_back("--trace-startup-format=json"); }
+    if (!controlled || startup_handoff) { args.push_back("--trace-config-file=" + utf8(store.filename("native-output/trace-config.json"))); args.push_back(protobuf_export ? "--trace-startup-format=proto" : "--trace-startup-format=json"); }
+    if (startup_handoff) args.push_back("--trace-startup-owner=system");
+    if (protobuf_export) args.push_back("--v8-trace-protobuf-export");
   }
   if (controlled) {
     auto control_file = store.filename("native-control/config.json");
-    store.json("native-control/config.json", {{"protocol", "v8trace/recording/1"}, {"captureId", store.capture_id}, {"token", sha256(uuid() + uuid())}, {"outputDirectory", utf8(store.filename("native-output"))}, {"url", o.at("url")}, {"startPaused", o.at("startPaused")}, {"netLog", o.at("netLog")}, {"trace", !categories.empty()}, {"traceConfig", config.at("trace_config")}});
+    Json control_config{{"protocol", "v8trace/recording/1"}, {"captureId", store.capture_id}, {"token", sha256(uuid() + uuid())}, {"outputDirectory", utf8(store.filename("native-output"))}, {"url", o.at("url")}, {"startPaused", o.at("startPaused")}, {"netLog", o.at("netLog")}, {"trace", !categories.empty()}, {"traceConfig", config.at("trace_config")}, {"httpDrain", http_drain}, {"nativeFlushTimeoutConfigured", native_flush_timeout}, {"startupTraceHandoff", startup_handoff}};
+    if (protobuf_export) {
+      control_config["traceFormat"] = "perfetto-protobuf";
+      control_config["traceExportProtocol"] = export_protocol;
+      control_config["maxTraceFileBytes"] = std::to_string(o.at("maxBytes").get<uint64_t>());
+    }
+    store.json("native-control/config.json", control_config);
     args.push_back("--v8-trace-recording-control=" + utf8(control_file));
     if (enabled(o, "hooks")) args.push_back("--v8-trace-env-hooks");
   }
@@ -268,7 +299,7 @@ Json launch_config(const Json& o, Store& store) {
   if (!flags.empty()) args.push_back("--js-flags=" + flags);
   if (enabled(o, "objectSnapshots")) for (auto [key, flag] : std::vector<std::pair<std::string, std::string>>{{"objectDepth", "depth"}, {"objectNodes", "nodes"}, {"objectProperties", "properties"}}) args.push_back("--v8-trace-object-" + flag + '=' + text(o.at(key)));
   if (enabled(o, "netLog") && !controlled) { args.push_back("--log-net-log=" + utf8(store.filename("native-output/netlog.json"))); args.push_back("--net-log-capture-mode=Everything"); args.push_back("--net-log-duration=" + text(o.at("durationSeconds"))); }
-  args.push_back(controlled ? "about:blank" : str(o, "url")); return {{"args", args}, {"config", config}, {"tracing", !categories.empty()}};
+  args.push_back(controlled ? "about:blank" : str(o, "url")); return {{"args", args}, {"config", config}, {"tracing", !categories.empty()}, {"controlled", controlled}, {"httpDrain", http_drain}, {"startupTraceHandoff", startup_handoff}};
 }
 Json render_prompt(const fs::path& assets, const Json& command) {
   if (!edition_prompt_available(str(command, "templateId"))) require_professional("JSVMP/WASM internal instrumentation case template");

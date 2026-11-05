@@ -33,6 +33,8 @@ $attempt=Join-Path $build ('package-binding-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $attempt | Out-Null
 $inputs=Join-Path $attempt 'source-inputs.json'
 Invoke-V8TraceBuildTool -Tool artifact_binding -Arguments @('snapshot','--source',$PSScriptRoot,'--edition',$Edition,'--output',$inputs)
+& python -B (Join-Path $PSScriptRoot 'runtime-cpp\cmake\prepare_perfetto_converter.py') --destination $build --cache (Join-Path $build 'perfetto-converter-cache') --receipt (Join-Path $attempt 'perfetto-converter-acceptance.json')
+if($LASTEXITCODE -ne 0){throw 'Pinned Perfetto converter preparation failed'}
 $nativeInputs=$null;$requiredPackageBytes=[int64]134217728
 if($NativeChromePath){
     $nativeInputs=Join-Path $attempt 'native-inputs.json'
@@ -69,6 +71,7 @@ $runtime = Join-Path $output 'runtime'
 $assets = Join-Path $output 'app\v8-trace'
 New-Item -ItemType Directory -Path $runtime,$assets -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $build 'v8trace-runtime.exe') -Destination $runtime
+foreach($name in @('trace_processor_shell.exe','trace-converter.json')){Copy-Item -LiteralPath (Join-Path $build $name) -Destination $runtime}
 $identity = Get-V8TraceRuntimeIdentity -Runtime (Join-Path $runtime 'v8trace-runtime.exe')
 if ($identity.edition.protocol -ne 'v8trace/edition/1' -or $identity.edition.id -ne $Edition -or -not $identity.edition.buildTimeIdentity) { throw '构建内核版本与打包请求不一致' }
 foreach ($name in @('scenario_presets.json','case_prompt_templates.json')) { Copy-Item -LiteralPath (Join-Path $PSScriptRoot $name) -Destination $assets }
@@ -104,6 +107,7 @@ if ($Edition -eq 'community') {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'professional\NOTICE') -Destination (Join-Path $output 'EDITION-NOTICE.txt')
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-cpp\licenses\sqlite.txt') -Destination (Join-Path $licenses 'sqlite.txt')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'runtime-cpp\licenses\perfetto.txt') -Destination (Join-Path $licenses 'perfetto.txt')
 & cmake --install $build --prefix $output --component Runtime --config Release
 if ($LASTEXITCODE -ne 0) { throw 'CMake Runtime 安装或实际依赖许可证复制失败' }
 $readmePath=Join-Path $output 'README.md'

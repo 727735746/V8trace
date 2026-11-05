@@ -11,6 +11,33 @@ Json decoded(Json event, uint64_t index) {
   try { auto args = field(event, "args", Json::object()); auto raw = field(args, "record"); record = raw.is_string() ? parse(text(raw)) : raw; } catch (...) {}
   auto name = str(event, "name");
   if (name == "V8TraceFunction" || name == "V8TraceCall" || name == "V8TraceCallStats") record = field(event, "args", Json::object());
+  if (name == "V8TraceCausalEvent") {
+    record = field(event, "args", Json::object());
+    for (auto key : {"epoch", "sequence", "taskId", "operationId", "resourceId", "relatedTaskId", "tid"}) {
+      auto value = field(record, key);
+      if (value.is_number_unsigned() || (value.is_number_integer() && value.get<int64_t>() >= 0))
+        record[key] = std::to_string(value.get<uint64_t>());
+    }
+  }
+
+  if (name == "V8TraceBrowser") {
+    const auto args = field(event, "args", Json::object());
+    const bool declared = record.is_object() && record.contains("nativeSourceProtocol");
+    if (declared || args.contains("v8traceSourceJson")) {
+      if (!declared || str(record, "nativeSourceProtocol") != "v8trace/native-script-interning/1" ||
+          str(record, "channel") != "script" || record.contains("source") ||
+          !field(args, "v8traceSourceJson").is_string() ||
+          !safe_uint(field(record, "nativeSourceJsonBytes")))
+        throw std::runtime_error("Invalid native script interning envelope");
+      const auto literal = str(args, "v8traceSourceJson");
+      if (record.at("nativeSourceJsonBytes").get<uint64_t>() != literal.size() ||
+          str(record, "nativeSourceJsonSha256") != sha256(literal))
+        throw std::runtime_error("Native script interned source byte/hash mismatch");
+      auto source = parse(literal);
+      if (!source.is_string()) throw std::runtime_error("Native interned source is not a JSON string");
+      record["source"] = std::move(source);
+    }
+  }
   std::string producer = text(field(event, "pid")) + '/' + text(field(event, "tid"));
   if ((name == "V8TraceDetail" && str(record, "channel") == "jscall") || name == "V8TraceFunction" || name == "V8TraceCall") if (record.contains("producerId")) producer += "/instance:" + str(record, "producerId");
   if (name == "V8TraceDetail") producer += '/' + str(record, "channel");
@@ -20,6 +47,10 @@ Json decoded(Json event, uint64_t index) {
   if (name == "V8TraceState" || name == "V8TraceAux") producer += "/state/" + str(record, "producerId") + '/' + str(record, "epoch");
   Json sequence = field(record, "producerSeq", 0); uint64_t seq = 0;
   try { if (sequence.is_string()) seq = decimal(text(sequence)); else if (safe_uint(sequence)) seq = sequence.get<uint64_t>(); } catch (...) {}
+  if (name == "V8TraceCausalEvent") {
+    producer = text(field(event, "pid")) + "/causal/" + str(record, "producerId") + '/' + str(record, "epoch");
+    try { seq = decimal(str(record, "sequence")); } catch (...) {}
+  }
   return {{"event", std::move(event)}, {"record", std::move(record)}, {"index", index}, {"producer", producer}, {"sequence", seq}};
 }
 bool compare(const Json& a, const Json& b, std::string_view group) {
@@ -127,6 +158,7 @@ Trace::Trace(const fs::path& file, std::string array_key) {
         has_array = true; reader.expect('['); reader.white();
         if (reader.peek() != ']') while (true) {
           auto event = reader.value(); auto event_name = str(event, "name"); std::string group = (event_name == "V8TraceState" || event_name == "V8TraceAux") ? "state" : (event_name == "V8TraceStateStats" || event_name == "V8TraceAuxStats") ? "state-stats" : (event_name == "V8TraceStateSession" || event_name == "V8TraceAuxSession") ? "state-session" : event_name == "V8TraceEnv" ? "env-probe" : event_name == "V8TraceEnvStats" ? "env-stats" : (event_name == "V8TraceCall" || event_name == "V8TraceFunction") ? "compact" : event_name == "V8TraceCallStats" ? "call-stats" : event_name == "V8TraceDetail" ? "detail" : event_name == "V8TraceCausality" ? "causality" : event_name == "V8TraceBrowser" ? "browser" : event_name == "V8TraceOpcode" ? "opcode" : event_name == "V8TraceFilter" ? "filter" : "generic";
+          if (event_name == "V8TraceCausalEvent") group = "causality";
           auto it = outputs.find(group); if (it == outputs.end()) it = outputs.emplace(group, std::ofstream(directory_ / (group + ".jsonl"), std::ios::binary)).first;
           auto row = decoded(std::move(event), event_count++); auto projection = sort_projection(row); auto previous = previous_keys.find(group);
           if (previous == previous_keys.end()) ordered[group] = true;

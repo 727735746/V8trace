@@ -10,6 +10,14 @@ namespace v8trace {
 namespace {
 void need(bool value, const char* error) { if (!value) throw std::runtime_error(error); }
 std::string header(const Json& headers, std::string_view key) { if (headers.is_object()) for (auto it = headers.begin(); it != headers.end(); ++it) if (lower(it.key()) == key) return text(it.value()); return ""; }
+std::string header_bytes(const Json& record, const char* key) {
+  need(field(record, key).is_string(), "Wire header byte representation missing");
+  auto encoded = str(record, key); need(encoded.size() % 2 == 0, "Wire header hex length differs");
+  auto digit = [](char value) -> unsigned { if (value >= '0' && value <= '9') return value - '0'; if (value >= 'a' && value <= 'f') return value - 'a' + 10; if (value >= 'A' && value <= 'F') return value - 'A' + 10; throw std::runtime_error("Wire header hex digit invalid"); };
+  std::string bytes; bytes.reserve(encoded.size() / 2);
+  for (size_t at = 0; at < encoded.size(); at += 2) bytes += char((digit(encoded[at]) << 4) | digit(encoded[at + 1]));
+  return bytes;
+}
 std::string decode_body(std::string data, const std::string& encodings, uint64_t maximum) {
   auto types = split(encodings.empty() ? "identity" : encodings, ','); std::reverse(types.begin(), types.end());
   for (auto type : types) {
@@ -44,18 +52,20 @@ struct Sequence {
 };
 struct Request {
   std::string key;
-  Json scope, request, response, completion, redirect, redirect_drain, response_end, request_end, upload, reuse, actual_headers, redirect_capture, redirect_end, upload_attempts;
+  Json scope, request, response, completion, redirect, redirect_drain, response_end, request_end, upload, reuse, actual_headers, redirect_capture, redirect_end, upload_attempts, wire_headers;
+  Json wire_header_attempts = Json::array();
+  Json source_start, source_end;
   std::vector<std::string> errors;
   std::optional<double> started, finished;
-  uint64_t request_bytes = 0, response_bytes = 0;
-  bool request_budget = false, response_budget = false;
-  fs::path request_file, response_file;
+  uint64_t request_bytes = 0, response_bytes = 0, source_bytes = 0;
+  bool request_budget = false, response_budget = false, source_budget = false;
+  fs::path request_file, response_file, source_file;
 };
 class BodySpool {
  public:
-  explicit BodySpool(Store& store) : root(store.filename("native-output/body-cpp-" + uuid())) { if (!fs::create_directory(root)) throw std::runtime_error("Create body spool failed"); }
-  ~BodySpool() { handles.clear(); std::error_code error; fs::remove_all(root, error); }
-  void append(fs::path& file, const std::string& key, std::string_view bytes) { if (file.empty()) file = root / sha256(key); auto name = utf8(file); auto it = handles.find(name); if (it == handles.end()) { if (handles.size() >= 32) handles.erase(handles.begin()); it = handles.emplace(name, std::ofstream(file, std::ios::binary | std::ios::app)).first; } it->second.write(bytes.data(), std::streamsize(bytes.size())); if (!it->second) throw std::runtime_error("HTTP body spool write failed"); }
+  explicit BodySpool(Store& store) : root(store.filename("native-output/body-cpp-" + uuid())) { if (!fs::create_directory(io_path(root))) throw std::runtime_error("Create body spool failed"); }
+  ~BodySpool() { handles.clear(); std::error_code error; fs::remove_all(io_path(root), error); }
+  void append(fs::path& file, const std::string& key, std::string_view bytes) { if (file.empty()) file = io_path(root / sha256(key)); auto name = utf8(file); auto it = handles.find(name); if (it == handles.end()) { if (handles.size() >= 32) handles.erase(handles.begin()); it = handles.emplace(name, std::ofstream(file, std::ios::binary | std::ios::app)).first; } it->second.write(bytes.data(), std::streamsize(bytes.size())); if (!it->second) throw std::runtime_error("HTTP body spool write failed"); }
   void flush() { for (auto& [name, handle] : handles) { handle.flush(); if (!handle) throw std::runtime_error("HTTP spool flush failed"); } handles.clear(); }
  private:
   fs::path root; std::map<std::string, std::ofstream> handles;
@@ -90,19 +100,57 @@ void import_browser(Trace& trace, Store& store, const Json& o) {
         }
       } else if (channel == "script") {
         need(field(record, "source").is_string() && field(record, "url").is_string(), "Native script source missing"); auto source = str(record, "source"), units = utf16le(source); auto identity = text(event.at("pid")) + '/' + text(field(record, "isolateAddress")) + '/' + text(field(record, "scriptId")) + '/' + sha256(units) + '/' + kind;
-        if (scripts.insert(identity).second) { Json catalog = scope; for (auto name : {"scriptId", "url", "kind", "compilationKind", "isModule", "lineOffset", "columnOffset"}) catalog[name] = field(record, name); catalog["source"] = store.blob(replacement_utf8(source), "native-script-source-utf8"); catalog["sourceUtf16"] = store.blob(units, "native-script-source-utf16le-lossless"); catalog["sourceCodeUnits"] = units.size() / 2; store.append("catalog/scripts.jsonl", catalog); }
+        auto source_utf8 = store.blob(replacement_utf8(source), "native-script-source-utf8");
+        auto source_utf16 = store.blob(units, "native-script-source-utf16le-lossless");
+        if (scripts.insert(identity).second) { Json catalog = scope; for (auto name : {"scriptId", "url", "kind", "compilationKind", "isModule", "lineOffset", "columnOffset"}) catalog[name] = field(record, name); catalog["source"] = source_utf8; catalog["sourceUtf16"] = source_utf16; catalog["sourceCodeUnits"] = units.size() / 2; store.append("catalog/scripts.jsonl", catalog); }
+        record["source"] = std::move(source_utf8); record["sourceUtf16"] = std::move(source_utf16);
+        record["sourceCodeUnits"] = units.size() / 2; record["sourceStorageProtocol"] = "v8trace/native-script-source/2";
       } else if (channel == "http") {
         need(field(record, "requestId").is_string(), "HTTP request ID missing"); auto request_key = text(event.at("pid")) + '/' + str(record, "requestId"); auto& value = requests[request_key]; if (value.key.empty()) { value.key = request_key; value.scope = scope; }
         if (kind == "request") { value.request = record; value.started = event.at("ts").get<double>(); }
         else if (kind == "request-headers") value.actual_headers = field(record, "headers");
+        else if (kind == "request-wire-headers") {
+          need(str(record, "wireHeadersProtocol") == "v8trace/http-wire-headers/1", "Wire header protocol differs");
+          need(decimal(str(record, "wireAttempt")) == value.wire_header_attempts.size() + 1, "Wire header attempt sequence differs");
+          need(field(record, "headers").is_object() && field(record, "headerPairs").is_array() && field(record, "requestLine").is_string(), "Wire header fields missing");
+          need(header_bytes(record, "requestLineBytesHex") == str(record, "requestLine"), "Wire request line byte representation differs");
+          Json fields = Json::object();
+          for (const auto& pair : record.at("headerPairs")) {
+            need(field(pair, "name").is_string() && (field(pair, "value").is_string() || field(pair, "value").is_null()), "Wire header pair invalid");
+            need(header_bytes(pair, "nameBytesHex") == str(pair, "name"), "Wire header name byte representation differs");
+            auto bytes = header_bytes(pair, "valueBytesHex");
+            if (field(pair, "value").is_string()) need(bytes == str(pair, "value"), "Wire header value byte representation differs");
+            fields[str(pair, "name")] = pair.at("value");
+          }
+          const auto& headers = record.at("headers");
+          need(fields.size() == headers.size(), "Wire header dictionary and ordered pairs differ");
+          for (auto it = fields.begin(); it != fields.end(); ++it) need(headers.contains(it.key()) && headers.at(it.key()) == it.value(), "Wire header dictionary and ordered pairs differ");
+          value.wire_headers = record; record["traceTimestampMicroseconds"] = event.at("ts"); value.wire_header_attempts.push_back(record);
+        }
         else if (kind == "response") value.response = record;
         else if (kind == "redirect") value.redirect = record;
         else if (kind == "reuse-resource") value.reuse = record;
         else if (kind == "upload-init") { value.upload = record; value.started = event.at("ts").get<double>(); uploads[text(event.at("pid")) + '/' + str(record, "uploadStreamId")].push_back(request_key); }
         else if (kind == "redirect-body-start") { need(str(record, "bodyProtocol") == "v8trace/redirect-body/1" && field(record, "url").is_string() && str(record, "bodyRepresentation") == "encoded-network-bytes", "Invalid redirect body start"); if (!value.redirect_drain.is_null()) bad(value, "http-redirect-body-duplicate-start"); value.redirect_drain = record; }
-        else if (kind == "body-chunk") {
-          auto direction = str(record, "direction"); need(direction == "request" || direction == "response", "Invalid body direction"); auto bytes = unbase64(str(record, "base64")); auto offset = decimal(str(record, "offset")); need(safe_uint(field(record, "bytes")) && bytes.size() == record.at("bytes").get<uint64_t>(), "Body byte count mismatch");
-          auto& count = direction == "request" ? value.request_bytes : value.response_bytes; auto& budget = direction == "request" ? value.request_budget : value.response_budget; auto& file = direction == "request" ? value.request_file : value.response_file;
+        else if (kind == "request-source-start") {
+          need(str(record, "bodyProtocol") == "v8trace/request-source/1" && field(record, "elements").is_array() && field(record, "allBytes").is_boolean(), "Invalid request source start");
+          uint64_t total = 0, index = 0; bool all_bytes = true;
+          for (const auto& element : record.at("elements")) {
+            need(safe_uint(field(element, "index")) && element.at("index").get<uint64_t>() == index++, "Invalid request source element index");
+            auto type = str(element, "type"); need(type == "bytes" || type == "file" || type == "data-pipe" || type == "chunked-data-pipe", "Invalid request source element type");
+            if (type == "bytes") { auto bytes = decimal(str(element, "bytes")); need(bytes <= UINT64_MAX - total, "Request source length overflow"); total += bytes; } else all_bytes = false;
+          }
+          need(field(record, "allBytes") == all_bytes && (all_bytes ? decimal(str(record, "expectedBytes")) == total : field(record, "expectedBytes").is_null()), "Request source manifest differs");
+          if (!value.source_start.is_null()) bad(value, "http-request-source-duplicate-start");
+          value.source_start = record;
+        } else if (kind == "request-source-end") {
+          need(!value.source_start.is_null() && str(record, "bodyProtocol") == "v8trace/request-source/1" && field(record, "complete").is_boolean(), "Invalid request source end"); decimal(str(record, "bytes"));
+          if (!value.source_end.is_null()) bad(value, "http-request-source-duplicate-end");
+          value.source_end = record;
+        } else if (kind == "body-chunk") {
+          auto direction = str(record, "direction"); need(direction == "request" || direction == "response" || direction == "request-source", "Invalid body direction");
+          if (direction == "request-source") need(field(value.source_start, "allBytes") == true, "Request source chunks lack a bytes-only manifest"); auto bytes = unbase64(str(record, "base64")); auto offset = decimal(str(record, "offset")); need(safe_uint(field(record, "bytes")) && bytes.size() == record.at("bytes").get<uint64_t>(), "Body byte count mismatch");
+          auto& count = direction == "request-source" ? value.source_bytes : direction == "request" ? value.request_bytes : value.response_bytes; auto& budget = direction == "request-source" ? value.source_budget : direction == "request" ? value.request_budget : value.response_budget; auto& file = direction == "request-source" ? value.source_file : direction == "request" ? value.request_file : value.response_file;
           if (offset != count) bad(value, "http-body-offset-gap", {{"direction", direction}, {"expected", count}, {"actual", offset}}); need(offset <= UINT64_MAX - bytes.size(), "HTTP offset overflow"); count = offset + bytes.size();
           if (count > maximum) { if (!budget) bad(value, "http-body-budget", {{"direction", direction}, {"limit", maximum}}); budget = true; }
           else if (!budget) spool.append(file, request_key + '/' + direction, bytes);
@@ -175,7 +223,20 @@ void import_browser(Trace& trace, Store& store, const Json& o) {
     if (!value.redirect_drain.is_null() && !attached.contains(key)) bad(value, "http-redirect-body-unattached", {{"url", field(value.redirect_drain, "url")}});
     if (value.request.is_null()) continue; ++request_count;
     try {
-      auto& request = value.request; auto& response = value.response; auto& completion = value.completion; std::optional<std::string> post; bool post_complete = true;
+      auto& request = value.request; auto& response = value.response; auto& completion = value.completion;
+      std::optional<std::string> source_post; std::string source_conclusion = "not-observed";
+      if (!value.source_start.is_null()) {
+        if (field(value.source_start, "allBytes") != true) source_conclusion = "unsupported-source-elements";
+        else {
+          if (field(value.source_end, "complete") == true && !value.source_budget && value.errors.empty() && decimal(str(value.source_end, "bytes")) == value.source_bytes && decimal(str(value.source_start, "expectedBytes")) == value.source_bytes) {
+            auto bytes = value.source_file.empty() ? std::string{} : read_file(value.source_file, maximum);
+            if (bytes.size() == value.source_bytes) source_post = std::move(bytes);
+          }
+          source_conclusion = source_post ? "complete" : "incomplete";
+          if (!source_post) bad(value, "http-request-source-incomplete");
+        }
+      }
+      std::optional<std::string> post; bool post_complete = true;
       if (str(request, "layer") == "network") {
         auto upload_id = str(request, "uploadStreamId"); if (!upload_id.empty()) { value.upload_attempts = Json::array(); Request* last = nullptr; auto candidates = uploads[text(field(value.scope, "processId")) + '/' + upload_id]; for (auto& upload_key : candidates) { auto& upload = requests.at(upload_key); if (upload.started && value.started && *upload.started >= *value.started && (!value.finished || *upload.started <= *value.finished)) { value.upload_attempts.push_back({{"requestId", upload.key}, {"complete", field(upload.request_end, "complete")}, {"bytes", upload.request_bytes}}); if (field(upload.request_end, "complete") == true) last = &upload; } } if (last) post = body(*last, true, last->request_end); post_complete = post.has_value(); if (!post_complete) bad(value, "http-upload-not-finalized"); }
       } else { post = body(value, true, value.request_end); post_complete = field(request, "requestBodyPresent") != true || post.has_value(); }
@@ -193,10 +254,36 @@ void import_browser(Trace& trace, Store& store, const Json& o) {
         auto prefix = read_file(value.response_file, maximum);
         if (prefix.size() == value.response_bytes) body_prefix = store.blob(prefix, str(response, "bodyRepresentation") == "encoded-network-bytes" ? "native-http-encoded-network-prefix" : "native-http-decoded-prefix");
       }
+      const bool network = str(request, "layer") == "network";
+      const bool wire_observed = !value.wire_headers.is_null();
+      const bool wire_declared = str(completion, "wireHeadersProtocol") == "v8trace/http-wire-headers/1";
+      if (network && (wire_observed || completion.contains("wireHeadersProtocol") || str(field(o, "browserIdentity"), "httpWireHeadersProtocol") == "v8trace/http-wire-headers/1")) {
+        if (!wire_declared) bad(value, "http-wire-headers-protocol-unobserved");
+        else {
+          need(field(completion, "wireHeaderCount").is_string(), "Wire header final count missing");
+          auto count = decimal(str(completion, "wireHeaderCount"));
+          if (count != value.wire_header_attempts.size()) bad(value, "http-wire-headers-count-mismatch", {{"declared", count}, {"observed", value.wire_header_attempts.size()}});
+          if (!field(completion, "wasCached").is_boolean() || !field(completion, "networkAccessed").is_boolean()) bad(value, "http-wire-headers-transport-proof-unobserved");
+          if (!count && field(completion, "success") == true && field(completion, "networkAccessed") != false) bad(value, "http-wire-headers-unobserved");
+        }
+      }
+      std::string headers_conclusion = wire_observed ? "observed-wire" : wire_declared && field(completion, "success") == true && field(completion, "networkAccessed") == false ? field(completion, "wasCached") == true ? "cached-without-network" : "local-without-network" : wire_declared && field(completion, "success") == false ? "not-observed-before-failure" : "application-before-send-only";
       Json record = value.scope; Json final_response = response; if (!final_response.is_null()) final_response["mimeType"] = mime;
       record["resourceIdentifier"]=field(request,"resourceIdentifier");
       record["completion"] = completion; record["bodyPrefix"] = body_prefix;
+      record["sourcePostBody"] = source_post ? store.blob(*source_post, "native-http-request-source-bytes") : Json(nullptr);
+      record["sourcePostBodyConclusion"] = source_conclusion;
+      record["requestSource"] = value.source_start;
+      if (!record["requestSource"].is_null()) record["requestSource"]["end"] = value.source_end;
+      record["postBodyObservation"] = post ? str(request, "layer") == "network" ? "upload-stream-read" : "renderer-request-source" : "not-observed";
       record.update({{"requestId", value.key}, {"nativeLayer", field(request, "layer")}, {"request", {{"url", field(request, "url")}, {"method", field(request, "method")}, {"headers", value.actual_headers.is_null() ? field(request, "headers") : value.actual_headers}, {"hasPostData", field(request, "requestBodyPresent")}}}, {"response", final_response}, {"type", type}, {"body", response_bytes ? store.blob(*response_bytes, "native-http-decoded-body") : Json(nullptr)}, {"encodedBody", encoded}, {"postBody", post ? store.blob(*post, "native-http-upload-bytes") : Json(nullptr)}, {"postBodyConclusion", post_complete ? "complete" : "external-upload-not-observed-at-this-layer"}, {"bodyConclusion", response_bytes ? "complete" : field(completion, "success") == true ? "not-observed-at-this-layer" : "failed-or-open"}, {"conclusion", field(completion, "success") == true && response_bytes && post_complete && value.errors.empty() ? "complete" : field(completion, "success") == false ? "failed" : "partial"}, {"startedAtTraceMicroseconds", value.started ? Json(*value.started) : Json(nullptr)}, {"finishedAtTraceMicroseconds", value.finished ? Json(*value.finished) : Json(nullptr)}, {"uploadAttempts", value.upload_attempts}, {"redirect", value.redirect}, {"redirectBodyCapture", value.redirect_capture}});
+      record["request"]["headersConclusion"] = headers_conclusion;
+      if (request.contains("netLogSource")) record["request"]["netLogSource"] = request.at("netLogSource");
+      record["wireHeaderAttempts"] = value.wire_header_attempts;
+      if (wire_observed) {
+        record["request"]["headers"] = value.wire_headers.at("headers");
+        for (const auto* field_name : {"wireHeadersProtocol", "headerPairs", "requestLine", "requestLineBytesHex"}) record["request"][field_name] = value.wire_headers.at(field_name);
+      }
       store.append("catalog/resources.jsonl", record); store.event("http", "request-complete", record, value.scope);
     } catch (const std::exception& e) { ++invalid; store.gap("browser-normalization-error", {{"requestId", value.key}, {"error", e.what()}}); }
   }

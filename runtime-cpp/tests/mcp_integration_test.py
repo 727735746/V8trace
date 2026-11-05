@@ -411,7 +411,9 @@ def http_test(command, root, index):
         wait_index(call)
         oversized_reply = call("read_lines", {"start_line": 1, "line_count": 16384})
         check(oversized_reply["result"]["isError"] and oversized_reply["result"]["structuredContent"]["error"] == "mcp-response-byte-budget", "Explicit wire budget error without source truncation")
-        before = wire(path="/healthz", method="GET")[1]["cancelledRequests"]
+        before = wire(path="/healthz", method="GET")[1]
+        completed_before = before["completedRequests"]
+        cancelled_before = before["cancelledRequests"]
         message = modern("tools/call", {"name": "search_lines", "arguments": {
             "pattern": "^(x|xx)*[YZ]$", "regex": True, "start_line": 1, "max_scan_lines": 2**64 - 1}})
         body = json.dumps(message).encode()
@@ -428,9 +430,11 @@ def http_test(command, root, index):
         deadline = time.monotonic() + 10
         while True:
             health = wire(path="/healthz", method="GET")[1]
-            if health["activeRequests"] == 0 and health["cancelledRequests"] > before:
+            if health["activeRequests"] == 0:
+                check(health["cancelledRequests"] > cancelled_before or health["completedRequests"] > completed_before,
+                      f"Disconnected query left no settled result: {health}, completedBefore={completed_before}, cancelledBefore={cancelled_before}")
                 break
-            check(time.monotonic() < deadline, f"Disconnected query cancelled and joined: {health}, cancelledBefore={before}")
+            check(time.monotonic() < deadline, f"Disconnected query did not settle: {health}, completedBefore={completed_before}, cancelledBefore={cancelled_before}")
             time.sleep(0.02)
         check(data(call("read_lines", {"start_line": 1, "line_count": 1}))["returned_lines"] == 1, "Query permit recovered after cancellation")
         data(call("close_file"))

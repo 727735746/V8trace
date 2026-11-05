@@ -106,11 +106,11 @@ bool loopback(const std::string& host) { return host == "127.0.0.1" || host == "
 std::string token(const Json& options) { auto file = str(options, "tokenFile"); if (file.empty()) return ""; auto value = trim(read_file(path(file), 4096)); if (value.size() < 16) throw std::runtime_error("TCP token must contain at least 16 bytes"); return value; }
 fs::path safe_file(const fs::path& root, const std::string& name) {
   auto relative = path(name); if (name.empty() || name.find('\\') != name.npos || name.find(':') != name.npos || relative.is_absolute() || relative.has_root_name()) throw std::runtime_error("Invalid TCP relative path");
-  for (auto& part : relative) {
+  for (auto part : relative) {
     auto component = utf8(part); if (component == "." || component == ".." || component.empty() || component.back() == '.' || component.back() == ' ' || component.find_first_of("<>\"|?*") != component.npos || std::any_of(component.begin(), component.end(), [](unsigned char c) { return c < 32; })) throw std::runtime_error("TCP unsafe path component rejected");
     auto stem = lower(component.substr(0, component.find('.'))); if (std::regex_match(stem, std::regex("con|prn|aux|nul|com[1-9]|lpt[1-9]"))) throw std::runtime_error("TCP Windows device path rejected");
   }
-  auto file = root / relative; if (!inside(root, file)) throw std::runtime_error("TCP path leaves destination"); auto current = root; for (auto& part : relative) { current /= part; if (fs::is_symlink(fs::symlink_status(current))) throw std::runtime_error("TCP symlink path rejected"); }
+  auto file = root / relative; if (!inside(root, file)) throw std::runtime_error("TCP path leaves destination"); auto current = root; for (auto part : relative) { current /= part; if (fs::is_symlink(fs::symlink_status(current))) throw std::runtime_error("TCP symlink path rejected"); }
   return file;
 }
 void durable_append(const fs::path& file, std::string_view bytes, uint64_t offset) {
