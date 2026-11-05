@@ -105,8 +105,8 @@
     },
     {
       "path": "editions/export-community-host.py",
-      "bytes": 11158,
-      "sha256": "98932a09b5bff41de49ecf46913fe3ea69ed084591742782abe5793ab3ee482e"
+      "bytes": 11259,
+      "sha256": "a31dfc9e09619247430a37d3d72e016f949444d27124491515d7122442dcf47b"
     },
     {
       "path": "editions/release_state.py",
@@ -220,8 +220,8 @@
     },
     {
       "path": "native/browser_metadata.py",
-      "bytes": 19811,
-      "sha256": "f381cce74b1ce235c551db5b84be67215cb899475c5d6e8cc8d7905e60b4b5ca"
+      "bytes": 20014,
+      "sha256": "a07e1e2111c35fd2a0214de671bca827a56a074f1b197eb1b810ab5ac8ffeecd"
     },
     {
       "path": "native/build_community_chrome.py",
@@ -304,14 +304,19 @@
       "sha256": "858b90e0e99053e3b4d4ed760aaf1301008c1a59b070eae37c664936d18650ff"
     },
     {
+      "path": "native/network-http.h",
+      "bytes": 9467,
+      "sha256": "61afdbbc0f8086256dd0ab85de0814c8cdd294e3bcbf1754242b6dc708858ac4"
+    },
+    {
       "path": "native/supervisor.py",
       "bytes": 9257,
       "sha256": "635ea9c0060d973e024b74440d28cc384c91e3dda95403889b6064fc62b0d094"
     },
     {
       "path": "native/test_browser_metadata.py",
-      "bytes": 7555,
-      "sha256": "150298007827e545b33b17f6783175ecdf6d91ddd2682224b39383b338860a89"
+      "bytes": 7474,
+      "sha256": "b03c0b17e1160e6d329f12af5264d65ab00180bbe04e85f07c3407d6cc80c560"
     },
     {
       "path": "native/test_compile_graph.py",
@@ -352,6 +357,16 @@
       "path": "native/v8trace-json.h",
       "bytes": 2385,
       "sha256": "e43289a96ba3eb7a5d57af83448c670a2f29495b882a60bc1add6f807ae40569"
+    },
+    {
+      "path": "native/v8trace-recording-browser.h",
+      "bytes": 3935,
+      "sha256": "a20812f4b91fae3f5698e96545a4833fb2bb13645b9ce24afa2a09a3bb2df1c8"
+    },
+    {
+      "path": "native/v8trace-recording-control.h",
+      "bytes": 19450,
+      "sha256": "1e53ec436824d4ea2abf06a0d373375672c1b36ff79d7fddbfbd264304735c93"
     },
     {
       "path": "native/v8trace-script-intern-cache.h",
@@ -1131,12 +1146,12 @@
     {
       "path": "verification/source-boundary-macos-arm64.commands.json",
       "bytes": 66391,
-      "sha256": "b9454843d93a9863aecfae78564ec495883d28a44e87de20be8f2330a112ccc9"
+      "sha256": "2f340b393d2e6ebbc94c2a62208bef8d4e8bd9d59f4ceef890eb25b4e82d6450"
     },
     {
       "path": "verification/source-boundary-macos-arm64.json",
       "bytes": 5831,
-      "sha256": "66df5f0771018799cd3d39cac29ddd271fb70f7314baba79b69100db6e5a892e"
+      "sha256": "ab3474379a88a1560ea634223057fadcf887215606c92f56ce3d9662da5e8d71"
     },
     {
       "path": "操作手册.md",

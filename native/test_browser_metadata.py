@@ -66,7 +66,7 @@ class BrowserMetadataTests(unittest.TestCase):
         self.assertNotIn('httpWireHeadersProtocol', m.load(self.output / 'v8trace-opcode.json'))
 
     def test_wire_headers_are_bound_to_compiled_header_and_raw_callback(self):
-        native = Path(m.__file__).resolve().parents[3] / 'native'
+        native = m.native_source_dir()
         loader = self.root / 'apply-check/services/network/url_loader.cc'
         loader.parent.mkdir(parents=True)
         loader.write_text('v8trace_http::WireRequestHeaders(url_request_.get(), headers);\n', encoding='utf-8')
@@ -82,7 +82,7 @@ class BrowserMetadataTests(unittest.TestCase):
         self.assertEqual(m.load(self.output / 'v8trace-opcode.json')['httpWireHeadersProtocol'], 'v8trace/http-wire-headers/1')
 
     def test_wire_header_without_compiled_callback_is_not_advertised(self):
-        native = Path(m.__file__).resolve().parents[3] / 'native'
+        native = m.native_source_dir()
         projection = m.load(self.projection)
         projection['files'].append(dict(path='services/network/v8trace-http.h', sha256=m.digest(native / 'network-http.h')))
         m.write(self.projection, projection)
@@ -102,7 +102,7 @@ class BrowserMetadataTests(unittest.TestCase):
             m.write_metadata(self.output, self.projection, self.receipt, self.dependencies)
 
     def test_http_drain_is_bound_to_both_compiled_shared_headers(self):
-        native = Path(m.__file__).resolve().parents[3] / 'native'
+        native = m.native_source_dir()
         rows = [dict(path='chrome/browser/' + name, sha256=m.digest(native / name))
                 for name in ('v8trace-recording-control.h', 'v8trace-recording-browser.h')]
         projection = m.load(self.projection)

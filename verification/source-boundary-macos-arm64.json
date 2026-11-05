@@ -2,7 +2,7 @@
   "protocol": "v8trace/edition-source-boundary/1",
   "edition": "community",
   "status": "runtime-compile-source-boundary-passed",
-  "commandsSha256": "b9454843d93a9863aecfae78564ec495883d28a44e87de20be8f2330a112ccc9",
+  "commandsSha256": "2f340b393d2e6ebbc94c2a62208bef8d4e8bd9d59f4ceef890eb25b4e82d6450",
   "coreSources": [
     {
       "path": "runtime-cpp/src/browser_import.cpp",

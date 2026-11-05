@@ -19,6 +19,11 @@ def digest(file):
     return value.hexdigest()
 
 
+def native_source_dir():
+    candidate = Path(__file__).resolve().parents[3] / 'native'
+    return candidate if candidate.is_dir() else Path(__file__).resolve().parent
+
+
 def load(file):
     return json.loads(file.read_text('utf-8-sig'))
 
@@ -28,6 +33,7 @@ def write(file, value):
 
 
 def write_metadata(output, projection_file, receipt_file, dependencies_file):
+    root = output.resolve(strict=True)
     projection, receipt = load(projection_file), load(receipt_file)
     if (projection.get('edition') != 'community' or projection.get('professionalProducersIncluded') is not False
             or receipt['status'] != 'compiled-not-validated' or receipt['exitCode'] != 0
@@ -72,12 +78,12 @@ def write_metadata(output, projection_file, receipt_file, dependencies_file):
         if relative.is_absolute() or '..' in relative.parts or ':' in str(relative):
             raise RuntimeError('GN runtime dependency leaves output: ' + entry)
         file = output.joinpath(*relative.parts)
-        if not file.resolve(strict=True).is_relative_to(output) or not file.is_file():
+        if not file.resolve(strict=True).is_relative_to(root) or not file.is_file():
             raise RuntimeError('Invalid GN runtime dependency: ' + entry)
         for path in [file, *file.parents]:
-            if path == output:
+            if path.resolve() == root:
                 break
-            if path.lstat().st_file_attributes & 1024:
+            if getattr(path.lstat(), 'st_file_attributes', 0) & 1024:
                 raise RuntimeError('Reparse point in runtime dependency: ' + entry)
         files.add(relative.as_posix())
     if not 5 <= len(files) <= 100000:
@@ -102,7 +108,7 @@ def write_metadata(output, projection_file, receipt_file, dependencies_file):
         bytecodeIdentity='bytecode-identity/1', browser='browser/1', redirectBody='redirect-body/1',
         recordingControl='recording/1', traceTransport='trace-transport/1')
     descriptor.update({key + 'Protocol': 'v8trace/' + value for key, value in protocols.items()})
-    shared_native = Path(__file__).resolve().parents[3] / 'native'
+    shared_native = native_source_dir()
     drain_headers = ('v8trace-recording-control.h', 'v8trace-recording-browser.h')
     if all((shared_native / name).is_file() and compiled.get('chrome/browser/' + name) == digest(shared_native / name) for name in drain_headers):
         descriptor['httpDrainProtocol'] = 'v8trace/http-drain/1'

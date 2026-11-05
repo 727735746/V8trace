@@ -30,7 +30,7 @@ def export_into(output):
         'editions/发行恢复与导出说明.md',
         'editions/verify-source-boundary.py', 'editions/source-policy.json', 'editions/版本拆分说明.md',
         'editions/community/LICENSE', 'editions/community/NOTICE',
-        'native/JSCall优化说明.md', 'native/v8trace-function-cache.h', 'native/v8trace-call-ledger.h', 'native/v8trace-json.h', 'native/v8trace-script-intern-cache.h', 'native/v8trace-sha256.h',
+        'native/JSCall优化说明.md', 'native/network-http.h', 'native/v8trace-recording-control.h', 'native/v8trace-recording-browser.h', 'native/v8trace-function-cache.h', 'native/v8trace-call-ledger.h', 'native/v8trace-json.h', 'native/v8trace-script-intern-cache.h', 'native/v8trace-sha256.h',
         'runtime-cpp/CMakeLists.txt', 'runtime-cpp/CMakePresets.json',
         'runtime-cpp/cmake/edition_build.h.in', 'runtime-cpp/cmake/msvc_utf8_launcher.py',
         'runtime-cpp/licenses/sqlite.txt', 'runtime-cpp/mcp-client.example.json',
