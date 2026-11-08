@@ -6,17 +6,20 @@
 
 媒体构建包含 H.264/AAC、Chrome FFmpeg、OpenH264 软件编码及 VP8/VP9。编译选项与采集时实际播放/编码分开验收，DRM 和硬件专属能力按实测单列。
 
-当前为完整社区源码候选；配套浏览器编译/运行验收仍在进行，尚未标记为稳定整包发行。
+当前为社区源码候选。Community 主机内核已在 macOS 26.4 arm64 通过构建与测试；Community 定制 Chromium 的 macOS 构建尚未完成。`SOURCE-MANIFEST.json` 仍显式标记 `publicSourceReleaseEligible=false`、`nativeVerificationComplete=false`，不把主机源码候选写成稳定整包发行。
 
-## macOS 本机验收（2026-11-05）
+## macOS 本机验收（2026-11-08）
 
-macOS 26.4 arm64 的 Community C++ 主机内核已在本机完成编译与测试：
+macOS 26.4 arm64 的本机验收范围：
 
-- 源码树 Community CTest：31/31 通过；公开导出树 CTest：30/30 通过（`build-supervisor` 私有测试不在公开导出中）。
-- 系统 Google Chrome 157.0.8103.38 的 CDP 本地夹具实采：6 项通过、3 项按条件跳过，覆盖 HTTP 正文、Console、脚本、Env、TCP 分块/续传和 Worker 退出。
-- 详细证据与本轮限制见 [macOS-ACCEPTANCE.md](macOS-ACCEPTANCE.md)。
+- Community C++ 主机内核：源码树 CTest 31/31 通过；公开导出树冷构建 30/30 通过（`build-supervisor` 私有测试不在公开导出中）。
+- Community 主机 d8 环境通道：PASS，98 个环境事件，getter 调用 0。
+- 公开导出源码边界：`professionalImplementationCount=0`，状态 `runtime-compile-source-boundary-passed`。
+- 本机附加验收，不随本仓库发行：Professional 定制 Chromium `151.0.7922.72` 的六项本地原生夹具矩阵 6/6 PASS。Chromium 可执行文件 SHA256 `dcd037c6ab85ae05a56282ac40fe8d0e54cb7e395ac3f6f8e2aae2496b7159cb`，Chromium Framework SHA256 `80b8158d1aa97fdc05d36440741214e720979bdbdf5e69455e7e916bfc4a4895`，描述文件 SHA256 `1c13ba8c12bb44bedb1fa23d51f5adefa12b8e7f2fd2f0682665a6c0242d199d`。
+- 该 Professional Chromium 未签名、未公证，只是本机定制构建；源码和二进制都不在本公开仓库。
+- ARM64 Community 定制 Chromium 仍未构建；现有 `native/build_community_chrome.py` 是 Windows x64/MSVC 入口，macOS 不能直接复用。
 
-ARM64 定制 Chromium 仍未产出：本机当前只有 Command Line Tools，缺少完整 Xcode 的 `actool`、`ibtool`；Chromium 源码与 CIPD 网络已复核可达，当前阻塞是完整 Xcode 未安装。系统 Chrome 的 CDP 结果不等同于原生 JSCall/Native/WASM/Opcode 通道，macOS 也没有 WinForms UI，只有 CLI 内核。
+详细计数、边界与未验证项见 [macOS-ACCEPTANCE.md](macOS-ACCEPTANCE.md)。系统 Chrome CDP 结果不能替代原生 JSCall/Native/WASM/Opcode 通道；macOS 也没有 WinForms UI，只有 CLI 内核。
 
 ## 功能边界
 

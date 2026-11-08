@@ -237,7 +237,7 @@ Json launch_config(const Json& o, Store& store) {
   if (protobuf_export) verify_perfetto_converter(executable_path().parent_path());
   Json config{{"startup_duration", o.at("durationSeconds")}, {"result_file", utf8(store.filename("native-output/trace.json"))}, {"trace_config", {{"record_mode", "record-until-full"}, {"trace_buffer_size_in_kb", std::clamp<uint64_t>(o.at("maxBytes").get<uint64_t>() / 1024, 4096, 1048576)}, {"included_categories", categories}, {"excluded_categories", Json::array({"*"})}}}};
   if (startup_handoff) config["startup_duration"] = 0;
-  std::vector<std::string> args{"--user-data-dir=" + utf8(store.filename("browser-profile")), "--no-first-run", "--no-default-browser-check"}; std::vector<std::string> features;
+  std::vector<std::string> args{"--user-data-dir=" + utf8(store.filename("browser-profile")), "--no-first-run", "--no-default-browser-check", "--disable-background-networking", "--disable-features=NetworkTimeServiceQuerying"}; std::vector<std::string> features;
   if (enabled(o, "disableExtensions")) args.push_back("--disable-extensions");
   const bool high_volume = enabled(o,"httpRootTrace") || enabled(o,"opcode") || !details(o).empty() || enabled(o,"vmpProbe");
   const auto identity = field(o,"browserIdentity");

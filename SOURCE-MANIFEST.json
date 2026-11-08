@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 3174,
-      "sha256": "31ff5acee40331a28e598d8a9a6ecc2c6b3abbcc1b57d7e517a06f87a95d2bae"
+      "bytes": 3855,
+      "sha256": "df008c1ce7a6dee2fa5904d7b5f99d7b8c519218cea54f34e32de7224bd9b4e8"
     },
     {
       "path": "UI主题与日志管理说明.md",
@@ -200,8 +200,8 @@
     },
     {
       "path": "macOS-ACCEPTANCE.md",
-      "bytes": 3223,
-      "sha256": "7764dc730520356c605bb8611b44c1a628b9fae7010cbd6f3a515346ffc89cd0"
+      "bytes": 6762,
+      "sha256": "d5071db51f634722709dc33e0af243cfe54b3e66f758a2ef7831131c2faa0e09"
     },
     {
       "path": "native/JSCall优化说明.md",
@@ -565,8 +565,8 @@
     },
     {
       "path": "runtime-cpp/src/env_import.cpp",
-      "bytes": 10346,
-      "sha256": "44982f9d389f9a2d9fbf26a72b910b81c4681e7e9be76bbcfba789baa4c292c3"
+      "bytes": 11445,
+      "sha256": "7ed72eaeb9cc9ecfc3e2971d08aad099945d85057505f561814a6055045457da"
     },
     {
       "path": "runtime-cpp/src/env_options.cpp",
@@ -585,8 +585,8 @@
     },
     {
       "path": "runtime-cpp/src/import.cpp",
-      "bytes": 15926,
-      "sha256": "6ff2cdc974bc0ba68d93c802ac26c192ba4497a349dd8c3bea8c817575978641"
+      "bytes": 16787,
+      "sha256": "e34d914206afe6310d6a1cfcc85a1185c398c8330f0519e8ce555d38c86212fd"
     },
     {
       "path": "runtime-cpp/src/index.cpp",
@@ -620,8 +620,8 @@
     },
     {
       "path": "runtime-cpp/src/options.cpp",
-      "bytes": 43710,
-      "sha256": "6f161b363390f6322f16cb040c28f624232aaf736086fc3f766393633acf0b6f"
+      "bytes": 43794,
+      "sha256": "63f4923f0d6e90de04acbfdf402553e65906153ee5f170b673e78aa3e308cc9d"
     },
     {
       "path": "runtime-cpp/src/platform.cpp",
@@ -660,8 +660,8 @@
     },
     {
       "path": "runtime-cpp/src/state_import.cpp",
-      "bytes": 26463,
-      "sha256": "45812c5952460e184de977e91478d8616a4bc9f78e0d2ba03dda88725d89979d"
+      "bytes": 27601,
+      "sha256": "b14a491375f8bb034b0c9dc3cf326ad2d6ac46ac9de8f042ec916386ebbe385d"
     },
     {
       "path": "runtime-cpp/src/state_options.cpp",
@@ -1145,13 +1145,13 @@
     },
     {
       "path": "verification/source-boundary-macos-arm64.commands.json",
-      "bytes": 66391,
-      "sha256": "2f340b393d2e6ebbc94c2a62208bef8d4e8bd9d59f4ceef890eb25b4e82d6450"
+      "bytes": 66999,
+      "sha256": "215b6c2e985413aeea671876b40ea639550c5f2ae4c6e1ba3bbced119f4718ac"
     },
     {
       "path": "verification/source-boundary-macos-arm64.json",
       "bytes": 5831,
-      "sha256": "ab3474379a88a1560ea634223057fadcf887215606c92f56ce3d9662da5e8d71"
+      "sha256": "a2dce8ae0fe6c04673824c55e9988e681993bfbdd8300ac4b9ca5b593a2fa8d6"
     },
     {
       "path": "操作手册.md",

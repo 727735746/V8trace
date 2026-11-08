@@ -2,7 +2,7 @@
   "protocol": "v8trace/edition-source-boundary/1",
   "edition": "community",
   "status": "runtime-compile-source-boundary-passed",
-  "commandsSha256": "2f340b393d2e6ebbc94c2a62208bef8d4e8bd9d59f4ceef890eb25b4e82d6450",
+  "commandsSha256": "215b6c2e985413aeea671876b40ea639550c5f2ae4c6e1ba3bbced119f4718ac",
   "coreSources": [
     {
       "path": "runtime-cpp/src/browser_import.cpp",
@@ -42,7 +42,7 @@
     },
     {
       "path": "runtime-cpp/src/env_import.cpp",
-      "sha256": "44982f9d389f9a2d9fbf26a72b910b81c4681e7e9be76bbcfba789baa4c292c3"
+      "sha256": "7ed72eaeb9cc9ecfc3e2971d08aad099945d85057505f561814a6055045457da"
     },
     {
       "path": "runtime-cpp/src/env_options.cpp",
@@ -58,7 +58,7 @@
     },
     {
       "path": "runtime-cpp/src/import.cpp",
-      "sha256": "6ff2cdc974bc0ba68d93c802ac26c192ba4497a349dd8c3bea8c817575978641"
+      "sha256": "e34d914206afe6310d6a1cfcc85a1185c398c8330f0519e8ce555d38c86212fd"
     },
     {
       "path": "runtime-cpp/src/index.cpp",
@@ -82,7 +82,7 @@
     },
     {
       "path": "runtime-cpp/src/options.cpp",
-      "sha256": "6f161b363390f6322f16cb040c28f624232aaf736086fc3f766393633acf0b6f"
+      "sha256": "63f4923f0d6e90de04acbfdf402553e65906153ee5f170b673e78aa3e308cc9d"
     },
     {
       "path": "runtime-cpp/src/platform.cpp",
@@ -110,7 +110,7 @@
     },
     {
       "path": "runtime-cpp/src/state_import.cpp",
-      "sha256": "45812c5952460e184de977e91478d8616a4bc9f78e0d2ba03dda88725d89979d"
+      "sha256": "b14a491375f8bb034b0c9dc3cf326ad2d6ac46ac9de8f042ec916386ebbe385d"
     },
     {
       "path": "runtime-cpp/src/state_options.cpp",

@@ -13,10 +13,28 @@ std::string session_key(const Json& event, const Json& record) {
   state_require(safe_uint(field(event, "pid")) && number(field(record, "epoch")) > 0, "Invalid native state session identity");
   return text(field(event, "v8traceWindow", 0)) + '/' + text(event.at("pid")) + '/' + family(record) + '/' + str(record, "epoch");
 }
-std::string producer_key(const Json& event, const Json& record, bool stats = false) {
-  auto thread = stats ? field(record, "producerThreadId") : field(event, "tid");
-  state_require(number(thread) > 0 && number(field(record, "producerId")) > 0, "Invalid native state producer identity");
-  return session_key(event, record) + '/' + std::to_string(number(thread)) + '/' + str(record, "producerId");
+std::string producer_key(const Json& event, const Json& record, uint64_t thread) {
+  state_require(thread > 0 && number(field(record, "producerId")) > 0, "Invalid native state producer identity");
+  return session_key(event, record) + '/' + std::to_string(thread) + '/' + str(record, "producerId");
+}
+std::string producer_key(const Json& event, const Json& record) {
+  return producer_key(event, record, number(field(event, "tid")));
+}
+std::string producer_key_compat(DiskIndex& index, const Json& event, const Json& record) {
+  auto exact = producer_key(event, record);
+  if (index.one("SELECT 1 AS present FROM producers WHERE k=?", Json::array({exact}))) return exact;
+  if (record.contains("producerThreadId")) {
+    auto legacy = producer_key(event, record, number(field(record, "producerThreadId")));
+    if (legacy != exact && index.one("SELECT 1 AS present FROM producers WHERE k=?", Json::array({legacy}))) return legacy;
+  }
+  auto window = text(field(event, "v8traceWindow", 0)), pid = text(event.at("pid"));
+  auto fam = family(record), epoch = str(record, "epoch"), instance = str(record, "producerId");
+  std::vector<std::string> matches;
+  index.each("SELECT k FROM producers", Json::array(), [&](const Json& row) {
+    auto candidate = text(row.at(0)); auto parts = split(candidate, '/');
+    if (parts.size() == 6 && parts[0] == window && parts[1] == pid && parts[2] == fam && parts[3] == epoch && parts[5] == instance) matches.push_back(candidate);
+  });
+  return matches.size() == 1 ? matches.front() : exact;
 }
 class ValueSpool {
  public:
@@ -187,7 +205,7 @@ void import_state(Trace& trace, Store& store, const Json& options) {
     auto record = row.at("record"), event = row.at("event");
     try {
       state_require(str(record, "protocol") == "v8trace/state-stats/1" && field(record, "final").is_boolean(), "Native state final statistics missing protocol");
-      auto key = producer_key(event, record, true); auto emitted = number(field(record, "emittedEvents")), attempted = number(field(record, "attempted")); state_require(attempted >= emitted, "Native state producer counters invalid");
+      auto key = producer_key_compat(index, event, record); auto emitted = number(field(record, "emittedEvents")), attempted = number(field(record, "attempted")); state_require(attempted >= emitted, "Native state producer counters invalid");
       if (family_channels(family(record)).empty()) {
         state_require(!attempted && !emitted && record.at("final") == true, "Unselected state producer recorded activity");
         store.append("native-state-unselected-producers.jsonl", {{"scope", key}, {"record", record}}); ++unselected_stats; return;

@@ -78,7 +78,18 @@ void import_detail(Trace& trace, Store& store, const Json& o) {
       need(str(record, "protocol") == "v8trace/call-stats/1" && safe_uint(field(record, "producerThreadId"), true) && safe_uint(field(record, "epoch"), true) && field(record, "final").is_boolean(), "Invalid JSCall producer statistics");
       for (auto name : {"attemptedCalls", "selectedCalls", "filteredCalls", "emittedEvents"}) need(safe_uint(field(record, name)), "Invalid JSCall producer counter");
       need(std::regex_match(str(record, "producerId"), std::regex("[1-9][0-9]*")), "JSCall producer instance missing");
-      auto key = text(field(event, "pid")) + '/' + text(record.at("producerThreadId")) + "/instance:" + str(record, "producerId");
+      auto pid = text(field(event, "pid"));
+      auto key = pid + '/' + text(field(event, "tid")) + "/instance:" + str(record, "producerId");
+      auto legacy_key = pid + '/' + text(field(record, "producerThreadId")) + "/instance:" + str(record, "producerId");
+      if (key != legacy_key && !call_events.contains(key) && !call_entries.contains(key) &&
+          (call_events.contains(legacy_key) || call_entries.contains(legacy_key))) key = legacy_key;
+      if (!call_events.contains(key) && !call_entries.contains(key)) {
+        auto suffix = "/instance:" + str(record, "producerId");
+        std::set<std::string> matches;
+        for (const auto& entry : call_events) if (entry.first.starts_with(pid + "/") && entry.first.ends_with(suffix)) matches.insert(entry.first);
+        for (const auto& entry : call_entries) if (entry.first.starts_with(pid + "/") && entry.first.ends_with(suffix)) matches.insert(entry.first);
+        if (matches.size() == 1) key = *matches.begin();
+      }
       need(!writer_stats.contains(key), "Duplicate JSCall producer statistics");
       writer_stats[key] = record;
       if (record.at("final") != true) store.gap("jscall-writer-nonfinal", {{"producer", key}});

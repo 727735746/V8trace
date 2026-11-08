@@ -5,10 +5,28 @@
 namespace v8trace {
 namespace {
 void require_env(bool valid, std::string_view message) { if (!valid) throw std::runtime_error(std::string(message)); }
-std::string env_producer(const Json& event, const Json& record, bool stats) {
-  auto thread = field(stats ? record : event, stats ? "producerThreadId" : "tid");
+std::string env_producer(const Json& event, const Json& record, const Json& thread) {
   require_env(safe_uint(field(event, "pid")) && safe_uint(thread) && safe_uint(field(record, "epoch"), true) && std::regex_match(str(record, "producerId"), std::regex("[1-9][0-9]*")), "Invalid environment producer identity");
   return text(field(event, "v8traceWindow", 0)) + '/' + text(event.at("pid")) + '/' + text(thread) + '/' + str(record, "producerId") + '/' + text(record.at("epoch"));
+}
+std::string env_producer(const Json& event, const Json& record) {
+  return env_producer(event, record, field(event, "tid"));
+}
+std::string env_producer_compat(DiskIndex& database, const Json& event, const Json& record) {
+  auto exact = env_producer(event, record);
+  if (database.one("SELECT 1 AS present FROM producers WHERE k=?", Json::array({exact}))) return exact;
+  if (record.contains("producerThreadId")) {
+    auto legacy = env_producer(event, record, field(record, "producerThreadId"));
+    if (database.one("SELECT 1 AS present FROM producers WHERE k=?", Json::array({legacy}))) return legacy;
+  }
+  auto window = text(field(event, "v8traceWindow", 0)), pid = text(event.at("pid"));
+  auto instance = str(record, "producerId"), epoch = text(record.at("epoch"));
+  std::vector<std::string> matches;
+  database.each("SELECT k FROM producers", Json::array(), [&](const Json& row) {
+    auto candidate = text(row.at(0)); auto parts = split(candidate, '/');
+    if (parts.size() == 5 && parts[0] == window && parts[1] == pid && parts[3] == instance && parts[4] == epoch) matches.push_back(candidate);
+  });
+  return matches.size() == 1 ? matches.front() : exact;
 }
 }
 void import_environment(Trace& trace, Store& store, const Json& options) {
@@ -22,7 +40,7 @@ void import_environment(Trace& trace, Store& store, const Json& options) {
     try {
       require_env(str(record, "protocol") == "v8trace/env/1" && field(record, "identityUnchanged") == true && field(record, "source").is_object() && safe_uint(field(record, "realmId")) && safe_uint(field(record, "gcEpoch")) && !str(record, "isolateId").empty(), "Malformed native environment envelope");
       require_env(str(event, "cat").find("disabled-by-default-v8.envprobe") != std::string::npos && field(event, "ts").is_number(), "Invalid native environment trace coordinates");
-      auto key = env_producer(event, record, false), phase = str(record, "phase");
+      auto key = env_producer(event, record), phase = str(record, "phase");
       auto sequence = field(record, "producerSeq"); require_env(safe_uint(sequence, true), "Invalid environment sequence");
       database.run("INSERT OR IGNORE INTO producers VALUES(?,0,0,0,0,0)", Json::array({key}));
       auto previous = *database.one("SELECT last,configured FROM producers WHERE k=?", Json::array({key}));
@@ -62,7 +80,7 @@ void import_environment(Trace& trace, Store& store, const Json& options) {
   trace.each("env-stats", [&](const Json& row) {
     auto record = row.at("record"), event = row.at("event");
     try {
-      auto key = env_producer(event, record, true);
+      auto key = env_producer_compat(database, event, record);
       require_env(str(record, "protocol") == "v8trace/env-stats/1" && field(record, "final").is_boolean(), "Malformed native environment statistics");
       for (auto name : {"attempted", "selected", "filtered", "emittedEvents"}) require_env(safe_uint(field(record, name)), "Invalid environment producer counter");
       require_env(record.at("attempted") >= record.at("selected") && record.at("attempted").get<uint64_t>() - record.at("selected").get<uint64_t>() == record.at("filtered").get<uint64_t>(), "Environment producer selection counters differ");
