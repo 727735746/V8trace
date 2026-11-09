@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 4292,
-      "sha256": "a22228b228a96eb8b769f57f1c7abf228abe54eaba4449847e557ca6c6d49c8e"
+      "bytes": 4276,
+      "sha256": "4400703e6c278bb814e850199cbf04cd13672ccb6f73860da7a8fa7e18a77d8c"
     },
     {
       "path": "UI主题与日志管理说明.md",
@@ -200,8 +200,8 @@
     },
     {
       "path": "macOS-ACCEPTANCE.md",
-      "bytes": 7947,
-      "sha256": "2ffec1d4f63f25a3ed0ec86a759e6c64abc7f4dacc65548f1ba389ba3cbbe83c"
+      "bytes": 7925,
+      "sha256": "aed862d593b300349e58adb34fa929809186289e1502a181ce79844cd29c098b"
     },
     {
       "path": "macOS-RELEASE.md",

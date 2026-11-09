@@ -1,6 +1,6 @@
 # macOS 26.4 arm64 本机验收
 
-日期：2026-11-08。范围：Community C++ 主机内核与公开源码导出；另附 Professional 定制 Chromium 验收记录；该 Professional 源码不在本仓库，二进制已通过 Release 资产发布。
+范围：Community C++ 主机内核与公开源码导出；另附 Professional 定制 Chromium 验收记录；该 Professional 源码不在本仓库，二进制已通过 Release 资产发布。
 
 ## 结论
 

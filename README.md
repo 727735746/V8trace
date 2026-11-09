@@ -8,7 +8,7 @@
 
 当前为社区源码候选。Community 主机内核已在 macOS 26.4 arm64 通过构建与测试；Community 定制 Chromium 的 macOS 构建尚未完成。`SOURCE-MANIFEST.json` 仍显式标记 `publicSourceReleaseEligible=false`、`nativeVerificationComplete=false`，不把主机源码候选写成稳定整包发行。
 
-## macOS 本机验收（2026-11-08）
+## macOS 本机验收
 
 macOS 26.4 arm64 的本机验收范围：
 
