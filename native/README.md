@@ -39,9 +39,29 @@ python -B .\native\build_community_chrome.py --checkout G:\chromium-community\sr
 
 可用 `--stage apply`、`verify`、`configure`、`build`、`package` 分阶段执行。已有且哈希相符的社区源码可重复验证；失败日志保留在指定 evidence 目录。
 
-## macOS 状态
+## macOS arm64
 
-macOS 26.4 arm64 已完成 Community C++ 主机内核的编译与测试；这不等同于 Community 定制 Chromium 完成。当前 `build_community_chrome.py` 仍是 Windows x64/MSVC 构建入口；macOS 需要独立的 ARM64 GN 参数、完整 Xcode 工具链（至少 `actool`、`ibtool`）、`.app/Contents/Frameworks` 运行文件清单和身份描述生成。Community 定制 Chromium 的 macOS 构建入口尚未实现。Professional 定制 Chromium 已完成构建与原生夹具矩阵，并随 Release 资产发布；系统 Google Chrome 的 CDP 结果不能替代原生浏览器验收。
+macOS 26.4 arm64 已完成 Community 定制 Chromium 的编译、`.app/Contents/Frameworks` 打包、身份描述生成与四项原生夹具验收。构建入口与 Windows 分开：
+
+1. 准备固定 revision 的 Chromium/V8 源码，并应用 `community-chromium.patch` 与 `community-v8.patch`。
+2. 使用完整 Xcode；本机通过 `DEVELOPER_DIR` 指定 `Xcode-26.5.app`，不修改全局 `xcode-select`。
+3. 复制 `args-macos-arm64.gn` 为输出目录的 `args.gn`，执行 GN 生成与 Ninja：
+
+```sh
+cp native/args-macos-arm64.gn out/macos-arm64-community/args.gn
+gn gen out/macos-arm64-community
+third_party/ninja/ninja -C out/macos-arm64-community chrome -j 6
+```
+
+4. 生成构建回执、`v8trace-opcode.json` 与运行文件清单：
+
+```sh
+python3 -B native/package_macos_community.py   --app out/macos-arm64-community/Chromium.app   --checkout .   --out-dir out/macos-arm64-community   --state chrome-build-state.json   --evidence package-evidence
+```
+
+5. 跑完原生矩阵后，用 `--validated-report matrix-evidence/result.json` 重新打包，描述文件会写入 `nativeRunValidated=true` 与验收证据哈希。矩阵命令与计数见仓库根目录 `macOS-ACCEPTANCE.md`。
+
+`package_macos_community.py` 会核验可执行文件与 Framework 哈希、Community 生产者标识、GN 参数、媒体构建配置，并拒绝含 Professional 生产者标记的二进制。macOS 包不含 `chrome.exe`、`chrome.dll`，运行验收针对 `Chromium.app/Contents/MacOS/Chromium`。
 
 ## 产物和验收
 

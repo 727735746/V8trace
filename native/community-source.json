@@ -10,13 +10,13 @@
   },
   "patchHashes": {
     "chromium": "bf4e66023d39c1f6ee2cd6a035a4b3fc703e34b5c0aeadb46fcded9ab28c7f67",
-    "v8": "d0fb95faf92956905a3fb3a00aa254d706b757b28856f8b5c031645d18d9d684"
+    "v8": "a7cb7f91a94c54da39ff2691a318ca20980a1a08522449aabbbd2e214c37611f"
   },
   "professionalProducersIncluded": false,
   "sourceLicense": "Apache-2.0",
   "author": "Alcohol",
   "cleanPatchApplicationVerified": true,
-  "nativeBuildValidated": false,
+  "nativeBuildValidated": true,
   "files": [
     {
       "path": "base/trace_event/v8trace-browser-record.h",
@@ -329,6 +329,11 @@
       "stockSha256": "c206b657a408031d9e4fa5cde1ad3de38dc4798508143a9a635198c16f11d241"
     },
     {
+      "path": "v8/src/builtins/arm64/builtins-arm64.cc",
+      "sha256": "598e7799a6fbfe951c683d517c21a32932ce55094afbbd34899777e09be6ced8",
+      "stockSha256": "aa1dbbb1d36614dd25c34c0b077025b3e50d882ba07e63798aeb9655262275e3"
+    },
+    {
       "path": "v8/src/builtins/builtins-utils.h",
       "sha256": "af0620fc72499ce511e9b6b5ee854c72dae6974ce85584ff3168b6c471815051",
       "stockSha256": "5ec170b729a47be9f9ab3be4ce09cdaaae9f6001481ce1d646290eae80067e5a"
@@ -427,6 +432,11 @@
       "path": "v8/src/runtime/runtime.h",
       "sha256": "d5fa8ca29d8d0abe94c1fbade2937dae73be102c2ef5bb06dcb1606aeece78f9",
       "stockSha256": "1a6c3fa8917c1eaf84a26843221b5c6a683db8b5ed6d304f2f3621f5ea5aae16"
+    },
+    {
+      "path": "v8/src/runtime/v8trace-arm64.inc",
+      "sha256": "51bf187ab221d7f018c52ba3070f7803f74eaac6bba4dab96ec70aaf7385d22e",
+      "stockSha256": null
     },
     {
       "path": "v8/src/runtime/v8trace-aux-inl.h",

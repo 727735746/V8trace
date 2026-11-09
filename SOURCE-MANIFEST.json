@@ -5,8 +5,8 @@
   "scope": "community-cpp-ui-and-native-build-source",
   "professionalImplementationIncluded": false,
   "fullNativeExportIncluded": false,
-  "nativeVerificationComplete": false,
-  "independentBuildVerified": false,
+  "nativeVerificationComplete": true,
+  "independentBuildVerified": true,
   "transformations": [
     {
       "path": "runtime-cpp/CMakeLists.txt",
@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 4118,
-      "sha256": "7a130503aa5d64533dd0cc61c3227e4371deed4f07c0f2ab8b05fa0e510ca474"
+      "bytes": 3012,
+      "sha256": "fbe6e7f7a15b92ef4df44b48251a6b21a3f0aed22a0186bb978683873bfc8bb9"
     },
     {
       "path": "UI主题与日志管理说明.md",
@@ -200,13 +200,13 @@
     },
     {
       "path": "macOS-ACCEPTANCE.md",
-      "bytes": 7704,
-      "sha256": "5316062698962e324d81c2c606b8e9650ea661069153e111dba7fd25d0758e60"
+      "bytes": 6622,
+      "sha256": "6b76240d38d0d72be3bb2db2901cd830117ce12cbb26b07e0a11cd8275ae7f8a"
     },
     {
       "path": "macOS-RELEASE.md",
-      "bytes": 3986,
-      "sha256": "7756c018a6e1b614febc7adc2ebca1395ca45ed184271e0aaab49935d03f03c3"
+      "bytes": 3717,
+      "sha256": "cd179c6cf160cd38a86a9f2bccfa2e7b6b22faa5f27959893cda6ab22659340f"
     },
     {
       "path": "native/JSCall优化说明.md",
@@ -215,8 +215,13 @@
     },
     {
       "path": "native/README.md",
-      "bytes": 5719,
-      "sha256": "7c947330fdcb271b9d304b7500cd4444600604a5c9ba9dc34f4c7282ad1d48a9"
+      "bytes": 6623,
+      "sha256": "fa728d57edcda5ab0749f39694529164a4bf3f665212d1cfe8c2ffc8e7982165"
+    },
+    {
+      "path": "native/args-macos-arm64.gn",
+      "bytes": 445,
+      "sha256": "dda2f1a01d4c16ddb11b7989959dfc830604860ab9c6d8fa3f393ace955708f1"
     },
     {
       "path": "native/args.gn",
@@ -240,13 +245,13 @@
     },
     {
       "path": "native/community-source.json",
-      "bytes": 25897,
-      "sha256": "28df270abe0bcff6d15c0dc838b7a6ba0188179fac50aa447bd212bb1edb5a22"
+      "bytes": 26311,
+      "sha256": "5900d5e30d197f42b6a7e645968d2d7b507887a5d1756a1b9d6ceb13c2d5e3c6"
     },
     {
       "path": "native/community-v8.patch",
-      "bytes": 193598,
-      "sha256": "d0fb95faf92956905a3fb3a00aa254d706b757b28856f8b5c031645d18d9d684"
+      "bytes": 197754,
+      "sha256": "a7cb7f91a94c54da39ff2691a318ca20980a1a08522449aabbbd2e214c37611f"
     },
     {
       "path": "native/generate_media_fixtures.py",
@@ -312,6 +317,11 @@
       "path": "native/network-http.h",
       "bytes": 9467,
       "sha256": "61afdbbc0f8086256dd0ab85de0814c8cdd294e3bcbf1754242b6dc708858ac4"
+    },
+    {
+      "path": "native/package_macos_community.py",
+      "bytes": 11028,
+      "sha256": "b845e45d1ca0ee7db0b18348fc372466a92c4071fd47afe71e984186ea67f5d9"
     },
     {
       "path": "native/supervisor.py",
@@ -1171,6 +1181,6 @@
   ],
   "communityNativeSourceIncluded": true,
   "fullInternalNativeExportIncluded": false,
-  "publicSourceReleaseEligible": false,
-  "nativeSourceManifestSha256": "28df270abe0bcff6d15c0dc838b7a6ba0188179fac50aa447bd212bb1edb5a22"
+  "publicSourceReleaseEligible": true,
+  "nativeSourceManifestSha256": "5900d5e30d197f42b6a7e645968d2d7b507887a5d1756a1b9d6ceb13c2d5e3c6"
 }

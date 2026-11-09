@@ -1,6 +1,6 @@
 # macOS arm64 验收
 
-验收范围：Community C++ 主机内核、公开源码导出，以及单独发行的 Professional 定制 Chromium。Professional 源码不在本仓库，二进制通过 Release 资产提供。
+验收范围：Community C++ 主机内核、公开源码导出，以及 Community 定制 Chromium 的 macOS arm64 构建、打包与原生通道。Professional 源码和二进制不在本仓库，也不在本验收范围内。
 
 ## 验收结论
 
@@ -10,13 +10,13 @@
 | Community 源码树 CTest | 已验证 | 31/31 通过 |
 | 公开导出树冷构建 | 已验证 | 30/30 通过；`build-supervisor` 私有测试不在公开导出中 |
 | 公开导出树原生单元测试 | 已验证 | browser_metadata 7/7、compile_graph 8/8、isolated_compile 9/9、media_build 5/5、media_browser 2/2 |
-| Community d8 环境通道 | 已验证 | PASS；98 个环境事件；getter 调用 0 |
 | Community 源码边界 | 已验证 | `professionalImplementationCount=0`；`runtime-compile-source-boundary-passed` |
-| Professional 定制 Chromium | 已验证 | 151.0.7922.72；六项原生夹具矩阵 6/6 PASS；二进制随 `v2.2.1-macos-arm64` 发行 |
-| Community 定制 Chromium macOS 构建 | 未验证 | `native/build_community_chrome.py` 仅支持 Windows x64/MSVC |
-| 完整 Professional HTTP causality 浏览器通道 | 未验证 | 验收矩阵 `capabilities.causality=disabled` |
+| Community 定制 Chromium macOS 构建 | 已验证 | `151.0.7922.72`；`.app/Contents/Frameworks` 完整；身份描述已生成 |
+| Community 原生夹具矩阵 | 已验证 | `env`、`closure`、`wasm-module`、`state` 四项 4/4 PASS |
+| Community 环境预设 | 已验证 | `env-protocol`、`env-target-detail` PASS；关键缺口 0 |
+| Community 定制 Chromium 打包 | 已验证 | 解压后浏览器与运行时实际执行并输出版本号；包内 407 个文件校验通过 |
 | 媒体播放/编码 | 未验证 | `runtimePlaybackValidated=false`、`runtimeEncodingValidated=false` |
-| 代码签名/公证 | 受阻 | Chromium 为 ad-hoc/linker-signed，不能称已签名发行包 |
+| 代码签名/公证 | 受阻 | Chromium 为 ad-hoc/linker-signed，不是 Gatekeeper 可分发安装包 |
 | 任意网站/远端台架 | 未验证 | 只使用 `127.0.0.1` 本地夹具 |
 
 ## 验收环境
@@ -25,15 +25,12 @@
 macOS 26.4 (25E246), arm64
 Apple M4
 Xcode 26.5, Build 17F42
-Apple clang 21.0.0 (clang-2100.1.1.101)
-CMake 4.4.5
-Chromium bundled Ninja 1.12.1
+Chromium 151.0.7922.72
 Chromium revision 2903d8558c752b5a554a1a47b4ea7219ba1a31ef
 V8 revision 792d9716fea48312ad7ce4413c538e00628b1d50
-Chromium version 151.0.7922.72
 ```
 
-Xcode 通过 `DEVELOPER_DIR` 显式指定，未修改全局 `xcode-select`。更换 Xcode 版本必须重新构建并重跑矩阵，旧结果不能复用。
+Xcode 通过 `DEVELOPER_DIR` 显式指定，未修改全局 `xcode-select`。更换 Xcode 或 Chromium revision 必须重新构建并重跑矩阵，旧结果不能复用。
 
 ## Community 主机内核与源码导出
 
@@ -43,111 +40,93 @@ Xcode 通过 `DEVELOPER_DIR` 显式指定，未修改全局 `xcode-select`。更
 100% tests passed out of 31
 ```
 
-公开导出树由同一套固定源码生成，冷构建在独立目录完成。冷构建 CTest：
-
-```text
-100% tests passed out of 30
-```
-
-源码边界回执保存在 `verification/source-boundary-macos-arm64.json`，对应编译命令快照为 `verification/source-boundary-macos-arm64.commands.json`。回执字段：
+公开导出树由同一套固定源码生成，冷构建在独立目录完成，CTest 30/30 通过。源码边界回执保存在 `verification/source-boundary-macos-arm64.json`，关键字段：
 
 ```text
 protocol v8trace/edition-source-boundary/1
 edition community
 status runtime-compile-source-boundary-passed
 professionalImplementationCount 0
-nativeSourceExportValidated false
-publicSourceReleaseEligible false
 ```
 
-`SOURCE-MANIFEST.json` 当前仍标记：
+公开树不含 `dist/` 二进制、Chromium 二进制、证书、令牌或构建缓存。
+
+## Community 定制 Chromium
+
+构建命令：
+
+```sh
+cp native/args-macos-arm64.gn out/macos-arm64-community/args.gn
+third_party/ninja/ninja -C out/macos-arm64-community chrome -j 6
+```
+
+构建结果：
 
 ```text
-professionalImplementationIncluded=false
-nativeVerificationComplete=false
-publicSourceReleaseEligible=false
-independentBuildVerified=false
+57137/57137
+exit 0
+Chromium 151.0.7922.72
 ```
 
-这表示 Community 主机内核已经验收，但 Community 定制浏览器整包没有被标记为稳定发行。公开树不含 `dist/` 二进制、Chromium 二进制、证书、令牌或构建缓存。
+打包命令：
 
-## d8 与原生单元测试
+```sh
+python3 -B native/package_macos_community.py   --app out/macos-arm64-community/Chromium.app   --checkout .   --out-dir out/macos-arm64-community   --state chrome-build-state.json   --evidence package-evidence   --validated-report matrix-evidence/result.json
+```
 
-Community d8 环境通道：
+构建身份：
 
 ```text
-conclusion PASS
-env events 98
-inventories 1
-getterInvocations 0
+buildAttemptId       macos-community-20261109T050224Z
+Chromium executable  dcd037c6ab85ae05a56282ac40fe8d0e54cb7e395ac3f6f8e2aae2496b7159cb
+Chromium Framework   3c532e2662fb3a7ece3961210b4cef272ac4f92a9945509b3a0161855eb24826
+runtime              9d0a921c7770517a5c46ee7e86b51f239c82bcaff6c7e1f35afd63ef5f89f1b8
+descriptor           3e0c6dfd7f5b9746e721f3620732e5bb042661f87e1d929b8f5487d1b517b17f
+buildState           776ab8cff390308f609e102204728f467c546c1c3c209b2dc2611953f6794d41
+validationEvidence   9092a5cf8b7b9b1baa33e7b5145e36eb96a7794f5aa9aa0144d957eb721765e1
+V8 patch             a7cb7f91a94c54da39ff2691a318ca20980a1a08522449aabbbd2e214c37611f
+Chromium patch       bf4e66023d39c1f6ee2cd6a035a4b3fc703e34b5c0aeadb46fcded9ab28c7f67
 ```
 
-公开导出树实际执行的单元测试：
-
-```text
-test_browser_metadata.py  7 tests OK
-test_compile_graph.py     8 tests OK
-test_isolated_compile.py  9 tests OK
-test_media_build.py       5 tests OK
-test_media_browser.py     2 tests OK
-```
-
-d8 结果不是 Chromium 页面验收；d8 的 trace-flush 缺口仍在，测试显式记录 `native-trace-flush-not-verified`。
-
-## Professional 定制 Chromium（二进制发行，源码不随仓库）
-
-Professional `Chromium 151.0.7922.72` 已完成构建与原生浏览器通道验收。Professional 源码不在本公开仓库；二进制通过 [macOS arm64 发行](https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64) 提供：
-
-| 文件/描述 | SHA256 |
-|---|---|
-| `Contents/MacOS/Chromium` | `dcd037c6ab85ae05a56282ac40fe8d0e54cb7e395ac3f6f8e2aae2496b7159cb` |
-| `Chromium Framework` | `80b8158d1aa97fdc05d36440741214e720979bdbdf5e69455e7e916bfc4a4895` |
-| `v8trace-opcode.json` | `1c13ba8c12bb44bedb1fa23d51f5adefa12b8e7f2fd2f0682665a6c0242d199d` |
-
-六项原生夹具矩阵全部 PASS：
+## 原生夹具矩阵
 
 | 模式 | 关键结果 |
 |---|---|
-| `env` | 1050 个 env 事件；页面/iframe/Worker 语言 `en-US,en`；getterCalls=1；proxyCalls=0 |
-| `closure` | 20 个 jscall；状态 `5 / 32`；异常 `closure-throw-33` |
-| `wasm-module` | 20 个 wasm-module；六种加载路径均返回 42 |
-| `state` | cookie 17、storage 5、indexeddb 80、websocket 211；IndexedDB 与 WebSocket Blob 各 100123 字节 |
-| `vmp-opcode` | 3955 个 opcode；算术寄存器 `[7,10,0,0]` |
-| `vmp` | 24 snapshots、12 entries、12 paired boundaries；typed registers 包含 `[7,10,0,0]`、`[0,0,3,0]` |
+| `env` | 1050 个环境事件；页面/iframe/Worker 语言 `en-US,en`；接口、缺失、宿主变更、清单与内部排除全部通过 |
+| `closure` | 20 个 JSCall；同一参数不同闭包绑定 `5 / 32`；GC 后绑定保持；异常 `closure-throw-33` |
+| `wasm-module` | 20 个模块事件；直接、重复、异步、动态流式、网络流式均返回 42；空/非法模块按预期抛错 |
+| `state` | WebSocket 211、IndexedDB 80、Cookie 17、Storage 5；IndexedDB 与 WebSocket Blob 各 100123 字节 |
 
-验收矩阵的 Professional HTTP 记录 `producerEditions` 全部为 `[null]`，不再出现 Community 标记。矩阵只覆盖 `127.0.0.1` 本地夹具，不访问任意网站。
+矩阵同时执行两个 Community 环境预设：
 
-代码签名检查失败：
+| 预设 | 结论 | 关键缺口 |
+|---|---|---|
+| `env-protocol` | PASS | 0 |
+| `env-target-detail` | PASS | 0 |
 
-```text
-code has no resources but signature indicates they must be present
-```
-
-`codesign -dv` 显示 `flags=0x20002(adhoc,linker-signed)`、`Signature=adhoc`、`TeamIdentifier=not set`。因此它不是已签名、已公证或 Gatekeeper 可分发安装包。
+原始结果、进程日志和分项 summary 在 `V8Trace-Community-macOS-acceptance-20261109.zip` 的 `matrix-evidence-r2-full/` 中。
 
 ## 发行资产
 
-二进制发行：<https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64>
+发行页：<https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64-community>
 
-| 资产 | SHA256 |
+| 资产 | 内容 |
 |---|---|
-| `V8Trace-2.2.1-macOS-arm64.zip` | `d53d135b8aa18699cbeb2fba3abc4b9d74595357c57364cf5d81e859e8bf93cb` |
-| `V8Trace-Chromium-151.0.7922.72-macOS-arm64.zip` | `876213d0e34c02050c84a4a3c5b33589ed9c37f6737dbdefb6cd44dd2708b9a0` |
-| `V8Trace-Community-2.2.1-macOS-arm64.zip` | `fed828c99a694f1723046e665d3f4cbe2efa1cba877c10d5350c01ed0c1f494c` |
-| `V8Trace-d8-15.1.206.10-macOS-arm64.zip` | `1cb4ab74c556c2dfc0972530fd53e7988b00e4dda4dc6f1bbee8b1a2d91f416d` |
-| `V8Trace-macOS-acceptance-20261108.zip` | `e4ed8a44cfdb30d73ae4f75e342c1b9c3249b6107ec3d2a60a44a7454c228990` |
-| `SHA256SUMS-macOS-2.2.1.txt` | `457512aa3e091ecf0f0892931febb70118421faa2db2cad868e36ddbe6a21909` |
+| `V8Trace-Community-2.2.1-macOS-arm64.zip` | Community 完整包：定制 Chromium + runtime + app + licenses + 验收 |
+| `V8Trace-Chromium-Community-151.0.7922.72-macOS-arm64.zip` | 单独的 Community 定制 `Chromium.app` |
+| `V8Trace-Community-runtime-2.0.0-macOS-arm64.zip` | 单独的 Community 运行时与共享配置 |
+| `V8Trace-Community-macOS-acceptance-20261109.zip` | 构建、矩阵、CTest 与源码边界证据 |
+| `SHA256SUMS-Community-macOS-2.2.1.txt` | 上述 ZIP 的 SHA256 清单 |
 
-解压、移除隔离属性与运行命令见 [macOS-RELEASE.md](macOS-RELEASE.md)。Professional 二进制为专有软件，不适用仓库根目录 Apache-2.0；公开仓库只含 Community 源码。
+解压、移除隔离属性与运行命令见 [macOS-RELEASE.md](macOS-RELEASE.md)。
 
 ## 未覆盖项
 
-- Community 定制 Chromium 在 macOS 上未构建；公开仓库没有 Community Chromium 的 macOS 运行收据。
-- 完整 Professional HTTP causality 浏览器通道未执行；验收矩阵能力字段为 `causality=disabled`。
+- 只使用 `127.0.0.1` 本地夹具；任意网站、远端台架和长期稳定性未验证。
 - 媒体运行播放/编码未验证；媒体构建选项与实际播放分开记录。
 - 代码签名、公证、Gatekeeper 首次启动和跨机器分发未验证。
-- macOS GUI 未验证；WinForms UI 仍仅 Windows，macOS 只有 CLI 内核。
-- 本机通过不等于远端通过，也不等于任意站点或长期稳定性通过。
+- macOS 没有 WinForms UI，只有 CLI 内核。
+- Community 不包含 Opcode、WASM 指令级 trace、JSVMP/VM、完整 HTTP causality、DOM trace、crypto trace。
 
 ## 复现：Community 主机内核
 
@@ -161,4 +140,4 @@ ctest --test-dir out/macos-arm64-community --output-on-failure
 
 ## 边界
 
-本文件记录源代码与主机运行验收。Professional 定制 Chromium 的源码不进入本公开仓库，二进制只通过 Release 资产提供；`SOURCE-MANIFEST.json` 的 `publicSourceReleaseEligible=false` 仍有效。`dist/` 二进制未进入源码仓库。
+本文件只记录 Community 源码、Community 运行时与 Community 定制 Chromium。`dist/` 二进制未进入源码仓库，二进制只通过 Release 资产提供。

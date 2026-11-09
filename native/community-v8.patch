@@ -3776,3 +3776,107 @@
    return result;
  }
  
+
+--- /dev/null
++++ b/src/runtime/v8trace-arm64.inc
+@@ -0,0 +1,64 @@
++void GenerateV8TraceNativeReturn(MacroAssembler* masm) {
++  Label done;
++  __ Ldrb(x8, __ ExternalReferenceAsOperand(
++                  ExternalReference::address_of_v8trace_native_flag(), x9));
++  __ Cbz(x8, &done);
++  // Preserve the accumulator and every caller-saved argument register.  The C
++  // call also clobbers lr; a builtin reached by tail call keeps its only return
++  // address in lr, so it has to survive the hook as well.
++  __ Push(x0, x1, x2, x3, x4, x5, x6, x7);
++  __ Push(x8, x9, x10, x11, x12, x13, x14, x15);
++  __ Push(x16, x17);
++  __ Push<MacroAssembler::kSignLR>(lr, padreg);
++  {
++    FrameScope scope(masm, StackFrame::MANUAL);
++    __ Mov(x1, x0);
++    __ Mov(x2, xzr);
++    __ Mov(x3, xzr);
++    __ Mov(x4, fp);
++    __ Mov(x5, xzr);
++    __ Mov(x6, 2);
++    __ Mov(kCArgRegs[0], ExternalReference::isolate_address());
++    __ CallCFunction(ExternalReference::v8trace_native_js_entry(), 7,
++                     SetIsolateDataSlots::kYes);
++  }
++  __ Pop<MacroAssembler::kAuthLR>(padreg, lr);
++  __ Pop(x17, x16);
++  __ Pop(x15, x14, x13, x12, x11, x10, x9, x8);
++  __ Pop(x7, x6, x5, x4, x3, x2, x1, x0);
++  __ Bind(&done);
++}
++
++void GenerateV8TraceNativeEntry(MacroAssembler* masm, bool construct) {
++  Label done;
++  __ Ldrb(x8, __ ExternalReferenceAsOperand(
++                  ExternalReference::address_of_v8trace_native_flag(), x9));
++  __ Cbz(x8, &done);
++  __ Push(x0, x1, x2, x3, x4, x5, x6, x7);
++  __ Push(x8, x9, x10, x11, x12, x13, x14, x15);
++  __ Push(x16, x17);
++  __ Push<MacroAssembler::kSignLR>(lr, padreg);
++  {
++    FrameScope scope(masm, StackFrame::MANUAL);
++    if (construct) {
++      // x3 is the incoming new.target and now lives at slot 16 of the save
++      // area (two slots for lr/pad, two for x16/x17, eight for x8..x15, and
++      // four more inside x0..x7).
++      __ Ldr(x5, MemOperand(sp, 16 * kSystemPointerSize));
++    } else {
++      __ Mov(x5, xzr);
++    }
++    __ Mov(x2, x0);
++    __ Add(x3, sp, Operand(20 * kSystemPointerSize));
++    __ Mov(x4, fp);
++    __ Mov(x6, construct ? 1 : 0);
++    __ Mov(kCArgRegs[0], ExternalReference::isolate_address());
++    __ CallCFunction(ExternalReference::v8trace_native_js_entry(), 7,
++                     SetIsolateDataSlots::kYes);
++  }
++  __ Pop<MacroAssembler::kAuthLR>(padreg, lr);
++  __ Pop(x17, x16);
++  __ Pop(x15, x14, x13, x12, x11, x10, x9, x8);
++  __ Pop(x7, x6, x5, x4, x3, x2, x1, x0);
++  __ Bind(&done);
++}
+
+--- a/src/builtins/arm64/builtins-arm64.cc
++++ b/src/builtins/arm64/builtins-arm64.cc
+@@ -1296,6 +1296,8 @@ void Builtins::Generate_BaselineOutOfLinePrologueDeopt(MacroAssembler* masm) {
+ //
+ // The function builds an interpreter frame. See InterpreterFrameConstants in
+ // frame-constants.h for its layout.
++#include "src/runtime/v8trace-arm64.inc"
++
+ void Builtins::Generate_InterpreterEntryTrampoline(
+     MacroAssembler* masm, InterpreterEntryTrampolineMode mode) {
+   Register closure = x1;
+@@ -1459,6 +1461,7 @@ void Builtins::Generate_InterpreterEntryTrampoline(
+   __ Ldr(kJavaScriptCallCodeStartRegister,
+          MemOperand(kInterpreterDispatchTableRegister, x1));
+   __ Call(kJavaScriptCallCodeStartRegister);
++  GenerateV8TraceNativeReturn(masm);
+ 
+   __ RecordComment("--- InterpreterEntryReturnPC point ---");
+   if (mode == InterpreterEntryTrampolineMode::kDefault) {
+@@ -2945,6 +2948,7 @@ void Builtins::Generate_CallOrConstructForwardVarargs(MacroAssembler* masm,
+ // static
+ void Builtins::Generate_CallFunction(MacroAssembler* masm,
+                                      ConvertReceiverMode mode) {
++  GenerateV8TraceNativeEntry(masm, false);
+   ASM_LOCATION("Builtins::Generate_CallFunction");
+   // ----------- S t a t e -------------
+   //  -- x0 : the number of arguments
+@@ -3250,6 +3254,7 @@ void Builtins::Generate_ConstructBoundFunction(MacroAssembler* masm) {
+ 
+ // static
+ void Builtins::Generate_Construct(MacroAssembler* masm) {
++  GenerateV8TraceNativeEntry(masm, true);
+   // ----------- S t a t e -------------
+   //  -- x0 : the number of arguments
+   //  -- x1 : the constructor to call (can be any Object)
