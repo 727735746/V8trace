@@ -15,8 +15,8 @@ macOS 26.4 arm64 的本机验收范围：
 - Community C++ 主机内核：源码树 CTest 31/31 通过；公开导出树冷构建 30/30 通过（`build-supervisor` 私有测试不在公开导出中）。
 - Community 主机 d8 环境通道：PASS，98 个环境事件，getter 调用 0。
 - 公开导出源码边界：`professionalImplementationCount=0`，状态 `runtime-compile-source-boundary-passed`。
-- 本机附加验收，不随本仓库发行：Professional 定制 Chromium `151.0.7922.72` 的六项本地原生夹具矩阵 6/6 PASS。Chromium 可执行文件 SHA256 `dcd037c6ab85ae05a56282ac40fe8d0e54cb7e395ac3f6f8e2aae2496b7159cb`，Chromium Framework SHA256 `80b8158d1aa97fdc05d36440741214e720979bdbdf5e69455e7e916bfc4a4895`，描述文件 SHA256 `1c13ba8c12bb44bedb1fa23d51f5adefa12b8e7f2fd2f0682665a6c0242d199d`。
-- 该 Professional Chromium 未签名、未公证，只是本机定制构建；源码和二进制都不在本公开仓库。
+- 本机附加验收，二进制已通过 Release 资产发布：Professional 定制 Chromium `151.0.7922.72` 的六项本地原生夹具矩阵 6/6 PASS。Chromium 可执行文件 SHA256 `dcd037c6ab85ae05a56282ac40fe8d0e54cb7e395ac3f6f8e2aae2496b7159cb`，Chromium Framework SHA256 `80b8158d1aa97fdc05d36440741214e720979bdbdf5e69455e7e916bfc4a4895`，描述文件 SHA256 `1c13ba8c12bb44bedb1fa23d51f5adefa12b8e7f2fd2f0682665a6c0242d199d`。
+- 该 Professional Chromium 未签名、未公证；二进制通过 [macOS arm64 发行](https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64) 提供，Professional 源码仍不在本公开仓库。发行资产、校验值与边界见 [macOS-RELEASE.md](macOS-RELEASE.md)。
 - ARM64 Community 定制 Chromium 仍未构建；现有 `native/build_community_chrome.py` 是 Windows x64/MSVC 入口，macOS 不能直接复用。
 
 详细计数、边界与未验证项见 [macOS-ACCEPTANCE.md](macOS-ACCEPTANCE.md)。系统 Chrome CDP 结果不能替代原生 JSCall/Native/WASM/Opcode 通道；macOS 也没有 WinForms UI，只有 CLI 内核。
@@ -37,6 +37,8 @@ python -B .\editions\stage-native-runtime.py --source G:\chromium-community\src\
 ```
 
 当前产物面向 Windows x64。请完整解压运行 V8Trace.exe，保留 runtime、app、chromium、配置及许可证目录，不要单独复制 EXE。
+
+macOS arm64 已发布可执行包：定制 Chromium `151.0.7922.72`、Professional / Community 运行时、d8 与验收证据。下载、校验值和边界见 [macOS-RELEASE.md](macOS-RELEASE.md)。macOS 目前没有 WinForms UI，只有 CLI 内核。
 
 ## 验证与许可
 

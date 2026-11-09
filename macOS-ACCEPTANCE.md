@@ -1,6 +1,6 @@
 # macOS 26.4 arm64 本机验收
 
-日期：2026-11-08。范围：Community C++ 主机内核与公开源码导出；另附本机 Professional 定制 Chromium 验收记录，但该 Professional 源码和二进制不随本仓库发行。
+日期：2026-11-08。范围：Community C++ 主机内核与公开源码导出；另附 Professional 定制 Chromium 验收记录；该 Professional 源码不在本仓库，二进制已通过 Release 资产发布。
 
 ## 结论
 
@@ -12,7 +12,7 @@
 | 公开导出树原生单元测试 | 已验证 | browser_metadata 7/7、compile_graph 8/8、isolated_compile 9/9、media_build 5/5、media_browser 2/2 |
 | Community d8 环境通道 | 已验证 | PASS；98 个环境事件；getter 调用 0 |
 | Community 源码边界 | 已验证 | `professionalImplementationCount=0`；`runtime-compile-source-boundary-passed` |
-| 本机 Professional 定制 Chromium | 已验证，仅本机 | Chromium 151.0.7922.72；六项本地原生夹具矩阵 6/6 PASS |
+| Professional 定制 Chromium | 已验证 | Chromium 151.0.7922.72；六项本地原生夹具矩阵 6/6 PASS；二进制随 `v2.2.1-macos-arm64` 发行 |
 | Community 定制 Chromium macOS 构建 | 未验证 | 当前 `native/build_community_chrome.py` 是 Windows x64/MSVC 入口 |
 | 完整 Professional HTTP causality 浏览器通道 | 未验证 | 本机矩阵明确 `capabilities.causality=disabled` |
 | 媒体播放/编码 | 未验证 | 描述文件保持 `runtimePlaybackValidated=false`、`runtimeEncodingValidated=false` |
@@ -94,9 +94,9 @@ test_media_browser.py     2 tests OK
 
 d8 结果不是 Chromium 页面验收；d8 的 trace-flush 缺口仍在，测试显式记录 `native-trace-flush-not-verified`。
 
-## 本机 Professional 定制 Chromium（不随仓库发行）
+## Professional 定制 Chromium（二进制发行，源码不随仓库）
 
-本机额外构建了 Professional `Chromium 151.0.7922.72`，用于验证原生浏览器通道。它不在本公开仓库，也不作为下载产物：
+本机额外构建了 Professional `Chromium 151.0.7922.72`，用于验证原生浏览器通道。Professional 源码不在本公开仓库；二进制通过 [macOS arm64 发行](https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64) 提供：
 
 | 文件/描述 | SHA256 |
 |---|---|
@@ -125,6 +125,21 @@ code has no resources but signature indicates they must be present
 
 `codesign -dv` 显示 `flags=0x20002(adhoc,linker-signed)`、`Signature=adhoc`、`TeamIdentifier=not set`。因此它不是已签名、已公证或 Gatekeeper 可分发安装包。
 
+## 发行资产
+
+二进制发行：<https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64>
+
+| 资产 | SHA256 |
+|---|---|
+| `V8Trace-2.2.1-macOS-arm64.zip` | `d53d135b8aa18699cbeb2fba3abc4b9d74595357c57364cf5d81e859e8bf93cb` |
+| `V8Trace-Chromium-151.0.7922.72-macOS-arm64.zip` | `876213d0e34c02050c84a4a3c5b33589ed9c37f6737dbdefb6cd44dd2708b9a0` |
+| `V8Trace-Community-2.2.1-macOS-arm64.zip` | `fed828c99a694f1723046e665d3f4cbe2efa1cba877c10d5350c01ed0c1f494c` |
+| `V8Trace-d8-15.1.206.10-macOS-arm64.zip` | `1cb4ab74c556c2dfc0972530fd53e7988b00e4dda4dc6f1bbee8b1a2d91f416d` |
+| `V8Trace-macOS-acceptance-20261108.zip` | `e4ed8a44cfdb30d73ae4f75e342c1b9c3249b6107ec3d2a60a44a7454c228990` |
+| `SHA256SUMS-macOS-2.2.1.txt` | `457512aa3e091ecf0f0892931febb70118421faa2db2cad868e36ddbe6a21909` |
+
+解压、移除隔离属性与运行命令见 [macOS-RELEASE.md](macOS-RELEASE.md)。Professional 二进制为专有软件，不适用仓库根目录 Apache-2.0；公开仓库只含 Community 源码。
+
 ## 未验证或受阻
 
 - Community 定制 Chromium 在 macOS 上未构建；公开仓库没有 Community Chromium 的 macOS 运行收据。
@@ -146,4 +161,4 @@ ctest --test-dir out/macos-arm64-community --output-on-failure
 
 ## 边界
 
-本文件记录本机源代码和主机运行验收。Professional 定制 Chromium 的源码、软件包和二进制不进入本公开仓库；`SOURCE-MANIFEST.json` 的 `publicSourceReleaseEligible=false` 仍有效。`dist/` 二进制未进入源码仓库。
+本文件记录本机源代码和主机运行验收。Professional 定制 Chromium 的源码不进入本公开仓库，二进制只通过 Release 资产提供；`SOURCE-MANIFEST.json` 的 `publicSourceReleaseEligible=false` 仍有效。`dist/` 二进制未进入源码仓库。

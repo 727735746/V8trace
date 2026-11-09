@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 3855,
-      "sha256": "df008c1ce7a6dee2fa5904d7b5f99d7b8c519218cea54f34e32de7224bd9b4e8"
+      "bytes": 4292,
+      "sha256": "a22228b228a96eb8b769f57f1c7abf228abe54eaba4449847e557ca6c6d49c8e"
     },
     {
       "path": "UI主题与日志管理说明.md",
@@ -200,8 +200,13 @@
     },
     {
       "path": "macOS-ACCEPTANCE.md",
-      "bytes": 6762,
-      "sha256": "d5071db51f634722709dc33e0af243cfe54b3e66f758a2ef7831131c2faa0e09"
+      "bytes": 7947,
+      "sha256": "2ffec1d4f63f25a3ed0ec86a759e6c64abc7f4dacc65548f1ba389ba3cbbe83c"
+    },
+    {
+      "path": "macOS-RELEASE.md",
+      "bytes": 3986,
+      "sha256": "7756c018a6e1b614febc7adc2ebca1395ca45ed184271e0aaab49935d03f03c3"
     },
     {
       "path": "native/JSCall优化说明.md",
