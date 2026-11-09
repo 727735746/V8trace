@@ -8,18 +8,19 @@
 
 当前为社区源码候选。Community 主机内核已在 macOS 26.4 arm64 通过构建与测试；Community 定制 Chromium 的 macOS 构建尚未完成。`SOURCE-MANIFEST.json` 仍显式标记 `publicSourceReleaseEligible=false`、`nativeVerificationComplete=false`，不把主机源码候选写成稳定整包发行。
 
-## macOS 本机验收
+## macOS 验收状态
 
-macOS 26.4 arm64 的本机验收范围：
+验收对象是 Community 主机内核、公开源码导出，以及单独发行的 Professional 定制 Chromium。当前结论：
 
-- Community C++ 主机内核：源码树 CTest 31/31 通过；公开导出树冷构建 30/30 通过（`build-supervisor` 私有测试不在公开导出中）。
-- Community 主机 d8 环境通道：PASS，98 个环境事件，getter 调用 0。
-- 公开导出源码边界：`professionalImplementationCount=0`，状态 `runtime-compile-source-boundary-passed`。
-- 本机附加验收，二进制已通过 Release 资产发布：Professional 定制 Chromium `151.0.7922.72` 的六项本地原生夹具矩阵 6/6 PASS。Chromium 可执行文件 SHA256 `dcd037c6ab85ae05a56282ac40fe8d0e54cb7e395ac3f6f8e2aae2496b7159cb`，Chromium Framework SHA256 `80b8158d1aa97fdc05d36440741214e720979bdbdf5e69455e7e916bfc4a4895`，描述文件 SHA256 `1c13ba8c12bb44bedb1fa23d51f5adefa12b8e7f2fd2f0682665a6c0242d199d`。
-- 该 Professional Chromium 未签名、未公证；二进制通过 [macOS arm64 发行](https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64) 提供，Professional 源码仍不在本公开仓库。发行资产、校验值与边界见 [macOS-RELEASE.md](macOS-RELEASE.md)。
-- ARM64 Community 定制 Chromium 仍未构建；现有 `native/build_community_chrome.py` 是 Windows x64/MSVC 入口，macOS 不能直接复用。
+- Community 主机内核：源码树 CTest 31/31 通过；公开导出树冷构建 30/30 通过（`build-supervisor` 私有测试不在公开导出中）。
+- Community d8 环境通道：PASS，98 个环境事件，getter 调用 0。
+- 公开源码边界：`professionalImplementationCount=0`，状态 `runtime-compile-source-boundary-passed`。
+- Professional 定制 Chromium：`151.0.7922.72`，六项本地原生夹具矩阵 6/6 PASS；二进制随 [macOS arm64 发行](https://github.com/727735746/V8trace/releases/tag/v2.2.1-macos-arm64) 提供，Professional 源码不在本公开仓库。
+- Community 定制 Chromium：macOS 构建入口尚未实现；`native/build_community_chrome.py` 仅支持 Windows x64/MSVC。
 
-详细计数、边界与未验证项见 [macOS-ACCEPTANCE.md](macOS-ACCEPTANCE.md)。系统 Chrome CDP 结果不能替代原生 JSCall/Native/WASM/Opcode 通道；macOS 也没有 WinForms UI，只有 CLI 内核。
+未覆盖的部分同样明确：定制 Chromium 未签名、未公证；完整 Professional HTTP causality 通道为 `causality=disabled`；媒体播放/编码未验收；只使用 `127.0.0.1` 本地夹具；macOS 没有 WinForms UI，只有 CLI 内核。
+
+验收明细、环境与证据见 [macOS-ACCEPTANCE.md](macOS-ACCEPTANCE.md)，发行资产与校验值见 [macOS-RELEASE.md](macOS-RELEASE.md)。系统 Chrome 的 CDP 结果不能替代原生 JSCall/Native/WASM/Opcode 通道。
 
 ## 功能边界
 

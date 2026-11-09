@@ -39,9 +39,9 @@ python -B .\native\build_community_chrome.py --checkout G:\chromium-community\sr
 
 可用 `--stage apply`、`verify`、`configure`、`build`、`package` 分阶段执行。已有且哈希相符的社区源码可重复验证；失败日志保留在指定 evidence 目录。
 
-## macOS 状态（2026-11-05）
+## macOS 状态
 
-macOS 26.4 arm64 已完成 Community C++ 主机内核的本机编译与测试；这不等同于定制 Chromium 完成。当前 `build_community_chrome.py` 仍是 Windows x64/MSVC 构建入口，macOS 需要独立的 ARM64 GN 参数、完整 Xcode 工具链（至少 `actool`、`ibtool`）、`.app/Contents/Frameworks` 运行文件清单和身份描述生成。本机只有 Command Line Tools，未产出 macOS 定制 Chromium，也未执行原生 JSCall/Native/WASM 通道；系统 Google Chrome 的 CDP 结果不能替代原生浏览器验收。Chromium 源码与 CIPD 网络已复核可达，当前阻塞是完整 Xcode 未安装。
+macOS 26.4 arm64 已完成 Community C++ 主机内核的编译与测试；这不等同于 Community 定制 Chromium 完成。当前 `build_community_chrome.py` 仍是 Windows x64/MSVC 构建入口；macOS 需要独立的 ARM64 GN 参数、完整 Xcode 工具链（至少 `actool`、`ibtool`）、`.app/Contents/Frameworks` 运行文件清单和身份描述生成。Community 定制 Chromium 的 macOS 构建入口尚未实现。Professional 定制 Chromium 已完成构建与原生夹具矩阵，并随 Release 资产发布；系统 Google Chrome 的 CDP 结果不能替代原生浏览器验收。
 
 ## 产物和验收
 

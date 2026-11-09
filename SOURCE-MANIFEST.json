@@ -55,8 +55,8 @@
     },
     {
       "path": "README.md",
-      "bytes": 4276,
-      "sha256": "4400703e6c278bb814e850199cbf04cd13672ccb6f73860da7a8fa7e18a77d8c"
+      "bytes": 4118,
+      "sha256": "7a130503aa5d64533dd0cc61c3227e4371deed4f07c0f2ab8b05fa0e510ca474"
     },
     {
       "path": "UI主题与日志管理说明.md",
@@ -200,8 +200,8 @@
     },
     {
       "path": "macOS-ACCEPTANCE.md",
-      "bytes": 7925,
-      "sha256": "aed862d593b300349e58adb34fa929809186289e1502a181ce79844cd29c098b"
+      "bytes": 7704,
+      "sha256": "5316062698962e324d81c2c606b8e9650ea661069153e111dba7fd25d0758e60"
     },
     {
       "path": "macOS-RELEASE.md",
@@ -215,8 +215,8 @@
     },
     {
       "path": "native/README.md",
-      "bytes": 5772,
-      "sha256": "34bd4aa34465b09e0b59bfb51795200601779fcfa314c626fcf04c038ea4c8db"
+      "bytes": 5719,
+      "sha256": "7c947330fdcb271b9d304b7500cd4444600604a5c9ba9dc34f4c7282ad1d48a9"
     },
     {
       "path": "native/args.gn",
@@ -410,8 +410,8 @@
     },
     {
       "path": "runtime-cpp/README.md",
-      "bytes": 17409,
-      "sha256": "505bf5d99b53dad88733b5c4a5b4f482bd2811f126f167e51aff56dec59ca0c0"
+      "bytes": 17373,
+      "sha256": "4243e9229369cb48ba7d9427cd0365411fb00a45b0ff341b5f6141870ca9bd86"
     },
     {
       "path": "runtime-cpp/VM探针与WASM模块说明.md",
@@ -1160,8 +1160,8 @@
     },
     {
       "path": "操作手册.md",
-      "bytes": 45281,
-      "sha256": "e8ec34ac22020e68344482041aca5611c69912c408f3362053608d4b20687028"
+      "bytes": 45196,
+      "sha256": "cf5a05d57cc6c68351ac7edfd3959870d2abfe5061a4a1b4eec21ba8856bfd82"
     },
     {
       "path": "编译指令.txt",
