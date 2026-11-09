@@ -420,8 +420,8 @@
     },
     {
       "path": "runtime-cpp/README.md",
-      "bytes": 17373,
-      "sha256": "4243e9229369cb48ba7d9427cd0365411fb00a45b0ff341b5f6141870ca9bd86"
+      "bytes": 17260,
+      "sha256": "438daae439a2a5c4da653b4562d009f0910f8029e848a36f4498b74c629d83e2"
     },
     {
       "path": "runtime-cpp/VM探针与WASM模块说明.md",
@@ -1170,13 +1170,13 @@
     },
     {
       "path": "操作手册.md",
-      "bytes": 45196,
-      "sha256": "cf5a05d57cc6c68351ac7edfd3959870d2abfe5061a4a1b4eec21ba8856bfd82"
+      "bytes": 45140,
+      "sha256": "ed389874c8a85335102872055eb24ebbf4b14aa803be120c279056d0b60b38ed"
     },
     {
       "path": "编译指令.txt",
-      "bytes": 2438,
-      "sha256": "d41eea0652ba47683f72dc1f49fe64b57220dece95315e4bce52291069d2ea36"
+      "bytes": 2454,
+      "sha256": "ceb2e3298439b82a5f213c4eaf6430ec1a9d80cfd4c0c9d2ee7f63f589db3ae3"
     }
   ],
   "communityNativeSourceIncluded": true,

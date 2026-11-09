@@ -2,7 +2,7 @@
 
 ## 2026-10-27 本地验收定位
 
-当前 Windows x64 配套候选为 `V8Trace-HTTPRoot-Candidate-20261027-R7`；29 项 CTest、无 CDP 有限链、未决/未读、暂停/手停、预算/异常退出及原生/UI/MCP/TCP 矩阵通过。macOS 26.4 arm64 另已完成 Professional 42/42、Community 31/31 CTest 和系统 Chrome CDP 实采；Professional 定制 Chromium `151.0.7922.72` 已完成原生夹具矩阵并随 Release 发布，Community 定制 Chromium 的 macOS 构建仍未完成，详见 [macOS 验收](../macOS-ACCEPTANCE.md)。有限样本三条目标根闭合；UI 实际核验 871 条上游 JSCall、Native/Opcode/DOM/加密和独立 HTTP oracle 的完整 payload。消费续段消除双 Worker/307 样本的环，但一项常驻栅格工作池 Job 仍未结束，三根保持 `completeCausality=false`，该对照只证明真实边界未被抹掉。截断前根未落盘时仍声明无链证明；macOS 和任意外部网站不据此视为通过。入口、源码补丁、SHA-256、原始失败和清理残留见 [中文交接](../完整链路验收与交接-20261027.md)。
+当前 Windows x64 配套候选为 `V8Trace-HTTPRoot-Candidate-20261027-R7`；29 项 CTest、无 CDP 有限链、未决/未读、暂停/手停、预算/异常退出及原生/UI/MCP/TCP 矩阵通过。macOS 26.4 arm64 另已完成 Community 31/31 CTest；Community 定制 Chromium `151.0.7922.72` 已完成编译、打包与四项原生夹具矩阵 4/4 PASS，并随 Community Release 发布，详见 [macOS 验收](../macOS-ACCEPTANCE.md)。有限样本三条目标根闭合；UI 实际核验 871 条上游 JSCall、Native/Opcode/DOM/加密和独立 HTTP oracle 的完整 payload。消费续段消除双 Worker/307 样本的环，但一项常驻栅格工作池 Job 仍未结束，三根保持 `completeCausality=false`，该对照只证明真实边界未被抹掉。截断前根未落盘时仍声明无链证明；macOS 和任意外部网站不据此视为通过。入口、源码补丁、SHA-256、原始失败和清理残留见 [中文交接](../完整链路验收与交接-20261027.md)。
 
 ## MCP 搜索 / 分析
 
@@ -45,7 +45,7 @@ Worker 输入为一行一条 JSON，启动选项增加 `recordingControl: true`�
 
 本目录实现独立 C++20 内核：浏览器进程管理、原生/CDP 两条采集通道、流式 trace 解码、逐次调用/Opcode/WASM、浏览器通道归一化、内容寻址正文和源码、案例导出，以及 TCP 收发。运行期不加载 Node.js，不通过 Node 子进程调用旧采集器。Env Hook 的 JavaScript 是被观察浏览器内执行的页面脚本，不是 Node 依赖。
 
-Windows 保留原有 WinForms 界面，采集工作改由 `runtime/v8trace-runtime.exe` 完成。macOS/Linux 的内核使用相同 CMake 工程；macOS 26.4 arm64 已完成 Professional 42/42、Community 31/31 CTest，并以系统 Google Chrome 完成 CDP 实采。Community 定制 Chromium 的 macOS 构建入口尚未实现；Professional 定制 Chromium `151.0.7922.72` 已完成原生夹具矩阵并随 Release 发布。系统 Chrome 的 CDP 结果不能替代原生插装验收。完整定制 Chromium 的平台迁移不是只编译此目录：其二进制、Framework 资源、插装与身份描述均需匹配。
+Windows 保留原有 WinForms 界面，采集工作改由 `runtime/v8trace-runtime.exe` 完成。macOS/Linux 的内核使用相同 CMake 工程；macOS 26.4 arm64 已完成 Community 31/31 CTest。Community 定制 Chromium `151.0.7922.72` 已完成编译、`.app/Contents/Frameworks` 打包、身份描述生成与四项原生夹具矩阵 4/4 PASS，并随 Release 发布。系统 Chrome 的 CDP 结果不能替代原生插装验收。完整定制 Chromium 的平台迁移不是只编译此目录：其二进制、Framework 资源、插装与身份描述均需匹配。
 
 旧 JS 采集源码目前仅作为迁移对照，待差分验收通过再删除。新 C++ 发行包不复制 Node 运行时、JS worker 或这些旧宿主模块，不做自动回退。关联证据明确保留未决边界；新旧关联索引的逐项等价验收尚未完成。
 
